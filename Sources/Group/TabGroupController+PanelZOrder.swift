@@ -21,6 +21,7 @@ extension TabGroupController {
     }
 
     func syncPanelZOrderWithFrontmostGroup() {
+        guard !isStopping else { return }
         let frontmost = frontmostGroup()
 
         if let frontmost, isGroupOnActiveSpace(frontmost) {
@@ -34,6 +35,7 @@ extension TabGroupController {
     }
 
     func reassertPanelZOrder(for group: TabGroup) {
+        guard !isStopping else { return }
         guard isGroupOnActiveSpace(group) else { return }
 
         let frontmostWindowID = engine.frontmostWindowID()

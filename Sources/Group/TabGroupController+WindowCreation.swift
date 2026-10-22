@@ -3,6 +3,7 @@ import ApplicationServices
 
 extension TabGroupController {
     func setAutoAddNewWindowsToStack(_ enabled: Bool) {
+        guard !isStopping else { return }
         autoAddNewWindowsToStack = enabled
         AppSettings.autoAddNewWindowsToStack = enabled
         if enabled {
@@ -13,6 +14,7 @@ extension TabGroupController {
     }
 
     func setAlwaysUseCompactMode(_ enabled: Bool) {
+        guard !isStopping else { return }
         alwaysUseCompactMode = enabled
         AppSettings.alwaysUseCompactMode = enabled
         for group in groups where isGroupOnActiveSpace(group) {
@@ -54,6 +56,7 @@ extension TabGroupController {
     }
 
     func resolveAndAutoAddWindow(pid: pid_t, element: AXUIElement, attemptsRemaining: Int) {
+        guard !isStopping else { return }
         let candidates = engine.candidateWindowElements(from: element, pid: pid)
         let onScreen = Set(engine.onScreenWindowFrames(excluding: []).map { $0.id })
         let window = candidates

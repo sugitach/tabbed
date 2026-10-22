@@ -9,6 +9,7 @@ extension TabGroupController {
     }
 
     func handleWindowNotification(id: WindowID, notification: String) {
+        guard !isStopping else { return }
         guard !isApplyingLayout, let group = group(containing: id) else { return }
 
         switch notification {
@@ -32,6 +33,7 @@ extension TabGroupController {
     }
 
     func beginTrackingActiveMove(for group: TabGroup) {
+        guard !isStopping else { return }
         activeMoveGroup = group
         activeMoveDeadline = Date().addingTimeInterval(0.2)
         guard activeMoveTimer == nil else { return }
@@ -41,6 +43,7 @@ extension TabGroupController {
     }
 
     func tickActiveMove() {
+        guard !isStopping else { return }
         guard let group = activeMoveGroup, let active = group.activeWindow,
               active.id != draggedWindow?.id, Date() <= activeMoveDeadline,
               let frame = engine.windowServerFrame(of: active.id) ?? engine.frame(of: active) else {

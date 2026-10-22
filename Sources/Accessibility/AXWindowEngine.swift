@@ -100,6 +100,28 @@ final class AXWindowEngine: WindowEngine {
         setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
     }
 
+    func isKnownClosed(_ window: ManagedWindow) -> Bool {
+        guard let app = NSRunningApplication(processIdentifier: window.pid), !app.isTerminated else {
+            return true
+        }
+        AXUIElementSetMessagingTimeout(window.element, 1.0)
+        var resolved = CGWindowID(0)
+        let error = _AXUIElementGetWindow(window.element, &resolved)
+        // Timeout/permission errors are unknown, not evidence that the window closed.
+        return error == .invalidUIElement || (error == .success && resolved != window.id)
+    }
+
+    func restoreFrame(_ frame: CGRect, of window: ManagedWindow) -> Bool {
+        AXUIElementSetMessagingTimeout(window.element, 1.0)
+        let cgFrame = CoordinateConverter.cgFrame(fromAppKit: frame)
+        let resized = setCGSizeAttribute(kAXSizeAttribute, value: cgFrame.size, on: window.element)
+        // Attempt position even when resizing fails, to recover as much as possible.
+        let moved = setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
+        guard resized, moved, let actual = self.frame(of: window) else { return false }
+        return abs(actual.minX - frame.minX) <= 2 && abs(actual.minY - frame.minY) <= 2
+            && abs(actual.width - frame.width) <= 2 && abs(actual.height - frame.height) <= 2
+    }
+
     func raise(_ window: ManagedWindow) {
         AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
     }
@@ -232,16 +254,18 @@ final class AXWindowEngine: WindowEngine {
         return AXValueGetValue(axValue, .cgSize, &size) ? size : nil
     }
 
-    private func setCGPointAttribute(_ attribute: String, value: CGPoint, on element: AXUIElement) {
+    @discardableResult
+    private func setCGPointAttribute(_ attribute: String, value: CGPoint, on element: AXUIElement) -> Bool {
         var mutableValue = value
-        guard let axValue = AXValueCreate(.cgPoint, &mutableValue) else { return }
-        AXUIElementSetAttributeValue(element, attribute as CFString, axValue)
+        guard let axValue = AXValueCreate(.cgPoint, &mutableValue) else { return false }
+        return AXUIElementSetAttributeValue(element, attribute as CFString, axValue) == .success
     }
 
-    private func setCGSizeAttribute(_ attribute: String, value: CGSize, on element: AXUIElement) {
+    @discardableResult
+    private func setCGSizeAttribute(_ attribute: String, value: CGSize, on element: AXUIElement) -> Bool {
         var mutableValue = value
-        guard let axValue = AXValueCreate(.cgSize, &mutableValue) else { return }
-        AXUIElementSetAttributeValue(element, attribute as CFString, axValue)
+        guard let axValue = AXValueCreate(.cgSize, &mutableValue) else { return false }
+        return AXUIElementSetAttributeValue(element, attribute as CFString, axValue) == .success
     }
 
 }

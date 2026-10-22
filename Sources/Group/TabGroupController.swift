@@ -24,6 +24,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
         return monitor
     }()
 
+    private(set) var isStopping = false
     var groups: [TabGroup] = []
     var autoAddNewWindowsToStack = AppSettings.autoAddNewWindowsToStack
     var alwaysUseCompactMode = AppSettings.alwaysUseCompactMode
@@ -55,6 +56,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     }
 
     func start() {
+        guard !isStopping else { return }
         dragMonitor.start()
         keyboardMonitor.start()
         observeSpaceChanges()
@@ -66,13 +68,50 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
 
     /// Re-read `~/.config/tabbed.toml` and apply any keyboard-shortcut changes.
     func reloadConfig() {
+        guard !isStopping else { return }
         config = TabbedConfig.load()
         keyboardMonitor.apply(settings: config.shortcuts)
+    }
+
+    /// Idempotent: a cancelled Quit stays stopped; the next Quit retries restoration.
+    func restoreWindowsForTermination() -> [ManagedWindow] {
+        isStopping = true
+        dragMonitor.stop()
+        dragMonitor.delegate = nil
+        keyboardMonitor.stop()
+        keyboardMonitor.delegate = nil
+        endTrackingActiveMove()
+        resetDragState()
+        NSWorkspace.shared.notificationCenter.removeObserver(self)
+        observer.onEvent = nil
+        appFocusObserver.onEvent = nil
+        windowCreationObserver.onEvent = nil
+        observer.unobserveAll()
+        appFocusObserver.unobserveAll()
+        windowCreationObserver.unobserveAll()
+
+        // Snapshot all groups before any restoration; do not dissolve while iterating.
+        let snapshot = groups
+        for group in snapshot { group.panel.hide() }
+        let entries = snapshot.flatMap { group in
+            group.windows.map { ($0, group.contentFrame) }
+        }
+        let failures = WindowRestoration.restore(
+            entries, screens: NSScreen.screens.map(\.visibleFrame),
+            isAlive: { !self.engine.isKnownClosed($0) },
+            move: { self.engine.restoreFrame($1, of: $0) }
+        )
+        if failures.isEmpty {
+            groups.removeAll()
+            mostRecentGroup = nil
+        }
+        return failures
     }
 
     // MARK: - DragMonitorDelegate
 
     func dragDidBegin(window: ManagedWindow?, at point: CGPoint) {
+        guard !isStopping else { return }
         guard let window else { return }
         draggedWindow = window
         if let frame = engine.frame(of: window) {
@@ -87,6 +126,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     }
 
     func dragDidMove(to point: CGPoint) {
+        guard !isStopping else { return }
         guard let dragged = draggedWindow else { return }
         if let size = draggedSize {
             let origin = CGPoint(x: point.x - dragGrabOffset.width,
@@ -101,10 +141,11 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     }
 
     func dragDidEnd(at point: CGPoint) {
+        guard !isStopping else { return }
         let dragged = draggedWindow
         resetDragState()
         DispatchQueue.main.async { [weak self] in
-            guard let self, let dragged else { return }
+            guard let self, !self.isStopping, let dragged else { return }
             if let target = self.engine.window(at: point, excluding: [dragged.id]) {
                 self.formGroup(dragged: dragged, target: target)
             } else if let sourceGroup = self.group(containing: dragged.id) {
@@ -129,6 +170,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
 
     /// Tab `dragged` onto `target`, preserving the target frame.
     func formGroup(dragged: ManagedWindow, target: ManagedWindow, knownFrame: CGRect? = nil) {
+        guard !isStopping else { return }
         guard dragged.id != target.id,
               let targetFrame = knownFrame ?? engine.frame(of: target) else {
             return
@@ -175,22 +217,22 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
 
     private func wire(_ group: TabGroup) {
         group.viewModel.onSelect = { [weak self, weak group] id in
-            guard let self, let group else { return }
+            guard let self, !self.isStopping, let group else { return }
             self.selectTab(id, in: group)
         }
         group.viewModel.onClose = { [weak self, weak group] id in
-            guard let self, let group else { return }
+            guard let self, !self.isStopping, let group else { return }
             self.untab(id, from: group)
         }
         group.viewModel.onActivateActive = { [weak self, weak group] in
-            guard let self, let group, let active = group.activeWindow else { return }
+            guard let self, !self.isStopping, let group, let active = group.activeWindow else { return }
             self.selectTab(active.id, in: group)
         }
         group.viewModel.onMoveBegan = { [weak group] in
             group?.moveAnchorFrame = group?.contentFrame
         }
         group.viewModel.onMoveChanged = { [weak self, weak group] translation in
-            guard let self, let group, let anchor = group.moveAnchorFrame else { return }
+            guard let self, !self.isStopping, let group, let anchor = group.moveAnchorFrame else { return }
             group.contentFrame = anchor.offsetBy(dx: translation.width, dy: translation.height)
             self.positionPanel(for: group)
             if let active = group.activeWindow {
@@ -198,7 +240,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
             }
         }
         group.viewModel.onMoveEnded = { [weak self, weak group] in
-            guard let self, let group else { return }
+            guard let self, !self.isStopping, let group else { return }
             group.moveAnchorFrame = nil
             self.applyLayout(for: group)
         }
