@@ -144,3 +144,20 @@ AX関数・プロセス一覧・画面・パネル・監視・レイアウト副
 main+テストの結果はローカル `Tests/Regression/results/20261022T005930443911Z/`。単独修正の証拠は `/tmp/tabbed-independent-branches-gyauaeki/quit-only/Tests/Regression/results/20261022T010006138294Z/` と同 `ax-only/Tests/Regression/results/20261022T010006138059Z/`。過去の7+11件の数は当時の実測であり、現在は通常Quit経由の18ケースである。XCTestアダプターはCLIを実行するため、修正前はコンパイルできてもassertionが失敗する。
 
 共通APIを両修正に含めたため、AXWindowEngine/WindowEngineの同じ挿入位置でGitの自動マージが競合する。統合時は同じisKnownClosedを1つだけ残し、Quit固有のrestoreFrameも保持する。AX修正がQuit側の実装やコミットを必要とする依存ではなく、同一追加を2回含めたことによるテキスト競合である。統合後のSources全ファイルを保全した以前の完成形とSHA256で照合する。
+
+
+### developの統合確認
+
+main `9481b628767921bd1af1b90c4d7448282c9757b6` を唯一の親とする各コミットを確認した。
+
+| ブランチ | main直下のコミット |
+| --- | --- |
+| fix/restore-windows-on-quit | `3e1b392aa4a388263aefbf42071096d866ec4c85` |
+| fix/retain-windows-on-ax-errors | `c82c98739702d1be854d5b68a537c4b53c6c451d` |
+| test/window-restoration-and-guest-e2e | `878176f9cdf377ec744076c0122bcba40a555140` |
+
+developをmainから作り、Quit（merge `31297bd`）、AX（merge `78c0fe3`）、テスト（merge `6339870`）の順に各--no-ffで統合した。共通APIの2ファイル競合はisKnownClosedを1つだけ残し、restoreFrameを保持して解決。統合後のSources全ファイルのSHA256は、再構成前に保全した完成ソースと一致した。テスト枝のmainとの差分にSourcesがないことも確認した。
+
+`bash Tests/test.sh internal` はテスト実行体コンパイル成功、18/18成功、本体型検査成功、XCTestアダプターの宣言shim型検査成功。ローカル証拠は `Tests/Regression/results/20261022T010203433462Z/`。これにより「修正前もビルド成功/テスト失敗、統合後は同じテストが成功」を確認した。従来のguest純粋176件/媒体25件のソースは不変で、今回は再実行していない。フルXcode/XCTest、アプリ起動、実OS/VM試験の追加なし。
+
+既存最終0.11 ISO SHA256 `e06a4a04ccb046d4ffa5980b409fcfd4e24bb10e93a135e29d6cdc36fca31335`、署名済み本体executable SHA256 `a0160cdd0579b8cd85a7dcc520e7c9db812989d5fef9679e0c1972427778b064` も再照合し不変。main/origin/mainと既存の成果物・VM・生ログは保持。新ソースと文書のGit差分検査、shell/Python構文確認も成功。この統合確認の追記はdevelopの文書コミットとして保存する。個人作者情報は指定どおり、Gitのglobal/local設定とリモートは変更せず、push/PRなし。
