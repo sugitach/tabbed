@@ -100,6 +100,17 @@ final class AXWindowEngine: WindowEngine {
         setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
     }
 
+    func isKnownClosed(_ window: ManagedWindow) -> Bool {
+        guard let app = NSRunningApplication(processIdentifier: window.pid), !app.isTerminated else {
+            return true
+        }
+        AXUIElementSetMessagingTimeout(window.element, 1.0)
+        var resolved = CGWindowID(0)
+        let error = _AXUIElementGetWindow(window.element, &resolved)
+        // Timeout/permission errors are unknown, not evidence that the window closed.
+        return error == .invalidUIElement || (error == .success && resolved != window.id)
+    }
+
     func raise(_ window: ManagedWindow) {
         AXUIElementPerformAction(window.element, kAXRaiseAction as CFString)
     }

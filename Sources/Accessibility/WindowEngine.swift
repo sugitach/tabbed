@@ -64,6 +64,9 @@ protocol WindowEngine: AnyObject {
     /// Move/resize the window in AppKit screen coordinates.
     func setFrame(_ frame: CGRect, of window: ManagedWindow)
 
+    /// Positive closure evidence only; an AX timeout/permission failure is unknown.
+    func isKnownClosed(_ window: ManagedWindow) -> Bool
+
     func raise(_ window: ManagedWindow)
     func activate(_ window: ManagedWindow)
     func isAlive(_ window: ManagedWindow) -> Bool
