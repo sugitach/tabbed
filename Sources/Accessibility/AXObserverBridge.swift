@@ -45,6 +45,10 @@ final class AXObserverBridge {
         CFRunLoopRemoveSource(CFRunLoopGetMain(), observation.source, .commonModes)
     }
 
+    func unobserveAll() {
+        for id in Array(observations.keys) { unobserve(id) }
+    }
+
     private static let notifications = [
         kAXMovedNotification,
         kAXResizedNotification,

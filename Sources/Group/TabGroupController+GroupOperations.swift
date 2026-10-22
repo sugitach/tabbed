@@ -2,6 +2,7 @@ import AppKit
 
 extension TabGroupController {
     func add(_ window: ManagedWindow, to group: TabGroup) {
+        guard !isStopping else { return }
         if group.contains(window.id) {
             group.activeIndex = group.windows.firstIndex { $0.id == window.id } ?? group.activeIndex
             applyLayout(for: group)
@@ -28,6 +29,7 @@ extension TabGroupController {
     }
 
     func positionPanel(for group: TabGroup) {
+        guard !isStopping else { return }
         let compact = group.useCompact
         if group.viewModel.compact != compact {
             group.viewModel.compact = compact
@@ -41,6 +43,7 @@ extension TabGroupController {
     }
 
     func applyLayout(for group: TabGroup) {
+        guard !isStopping else { return }
         guard isGroupOnActiveSpace(group) else {
             group.panel.hide()
             group.syncViewModel()
@@ -79,6 +82,7 @@ extension TabGroupController {
     }
 
     func selectTab(_ id: WindowID, in group: TabGroup) {
+        guard !isStopping else { return }
         guard let idx = group.windows.firstIndex(where: { $0.id == id }) else { return }
         group.activeIndex = idx
         applyLayout(for: group)
@@ -88,6 +92,7 @@ extension TabGroupController {
     }
 
     func untab(_ id: WindowID, from group: TabGroup) {
+        guard !isStopping else { return }
         guard let window = group.windows.first(where: { $0.id == id }) else { return }
         let base = group.contentFrame
         remove(id, from: group, keepWindowObserved: false)

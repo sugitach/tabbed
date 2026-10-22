@@ -32,6 +32,7 @@ extension TabGroupController {
     }
 
     @objc func applicationDidTerminate(_ notification: Notification) {
+        guard !isStopping else { return }
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
             return
         }
@@ -44,6 +45,7 @@ extension TabGroupController {
     }
 
     func pruneDeadWindows() {
+        guard !isStopping else { return }
         for group in groups {
             for window in group.windows where !engine.isAlive(window) {
                 remove(window.id, from: group, keepWindowObserved: false)
@@ -52,6 +54,7 @@ extension TabGroupController {
     }
 
     @objc func activeSpaceChanged() {
+        guard !isStopping else { return }
         pruneDeadWindows()
         for group in groups {
             if isGroupOnActiveSpace(group) {
@@ -63,11 +66,13 @@ extension TabGroupController {
     }
 
     @objc func applicationDidActivate(_ notification: Notification) {
+        guard !isStopping else { return }
         pruneDeadWindows()
         syncPanelZOrderWithFrontmostGroupSoon()
     }
 
     @objc func applicationDidLaunch(_ notification: Notification) {
+        guard !isStopping else { return }
         guard autoAddNewWindowsToStack,
               let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
             return

@@ -28,6 +28,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("[Tabbed] controller started — global ⌘-drag monitor active")
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let failures = controller.restoreWindowsForTermination()
+        guard !failures.isEmpty else { return .terminateNow }
+        let alert = NSAlert()
+        alert.messageText = "Some windows could not be restored"
+        alert.informativeText = "Tabbed has stopped managing windows. Restore the listed windows manually, then choose Quit again to retry.\n\n"
+            + failures.map { "\($0.appName): \($0.title)" }.joined(separator: "\n")
+        alert.addButton(withTitle: "Keep Open")
+        alert.runModal()
+        return .terminateCancel
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Fallback for normal termination notifications; no guarantee after SIGKILL/crash.
+        let failures = controller.restoreWindowsForTermination()
+        if !failures.isEmpty {
+            NSLog("[Tabbed] termination restoration failed for %d windows", failures.count)
+        }
+    }
+
     // MARK: - Status bar
 
     private func setUpStatusItem() {
