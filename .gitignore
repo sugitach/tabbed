@@ -12,3 +12,6 @@ Tabbed.xcodeproj/
 
 # Keep winmux reference out of this project's history
 winmux/
+
+# Non-GUI regression outputs, source snapshots, logs and compiler caches
+Tests/Regression/results/

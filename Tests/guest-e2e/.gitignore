@@ -1,0 +1,15 @@
+exports/
+.module-cache/
+.local/
+results/
+captures/
+__pycache__/
+*.pyc
+*.iso
+*.dmg
+*.img
+*.qcow2
+*.utm/
+*.app/
+*.zip
+*.xcuserstate

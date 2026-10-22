@@ -38,6 +38,9 @@ targets:
     platform: macOS
     sources:
       - path: Tests
+        excludes:
+          - "guest-e2e/**"
+          - "Regression/**"
     dependencies:
       - target: Tabbed
     settings:

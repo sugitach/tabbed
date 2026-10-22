@@ -1,0 +1,11 @@
+{
+  "Sources/Fixture/main.swift": "b80478ae3f8d99dc50ea8b2ca20b5b8c95e42a43f98bc9a777c3945e5a95708b",
+  "Sources/Driver/Runner.swift": "57e827d26efe4885544ae7341b906db2352ee2b472d6627dc417a6d4f533020e",
+  "Sources/Driver/Observation.swift": "c853382d5387fb248b1394d43f3e54cfa83862ffd2ad60a9997457607f33762e",
+  "Sources/Driver/InputLease.swift": "e3df17c877baef359a267003b27e0f35cf67df70865dd41f9ccc75d8e7827f8b",
+  "Sources/Driver/main.swift": "d828eb7dde95dac8577261964a8d980436344d21b08a3bf20f6d9f55a1243a53",
+  "Sources/Shared/Protocol.swift": "9c8f606a8507baec1b91c988bbff10e3a1f158e9069ac59c8f35315f77db1f66",
+  "Tests/main.swift": "bebc0b8ff02ed5eabc82172932e3a099ebdf2bd808d7d20f4f2aa08df2c64837",
+  "scripts/package.py": "369a918bb521cb6b9a825b6badea78beb719716160f7deaeacec096f6f7bd7f8",
+  "scripts/build.py": "23e63dba87e7348ce5c7e8d8af0e6f3bce7ef6d8689ff58e901f059b24deb31d"
+}
