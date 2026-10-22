@@ -47,7 +47,8 @@ extension TabGroupController {
     func pruneDeadWindows() {
         guard !isStopping else { return }
         for group in groups {
-            for window in group.windows where !engine.isAlive(window) {
+            // Unknown AX liveness must not discard a parked window's Quit target.
+            for window in group.windows where engine.isKnownClosed(window) {
                 remove(window.id, from: group, keepWindowObserved: false)
             }
         }
