@@ -81,17 +81,12 @@ final class AXWindowEngine: WindowEngine {
     }
 
     func candidateWindowElements(from element: AXUIElement, pid: pid_t) -> [AXUIElement] {
-        var candidates = [element]
-        let appElement = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(appElement, 1.0)
-
-        if let focused = copyAXElementAttribute(kAXFocusedWindowAttribute, from: appElement) {
-            candidates.append(focused)
-        }
-        if let main = copyAXElementAttribute(kAXMainWindowAttribute, from: appElement) {
-            candidates.append(main)
-        }
-        return candidates
+        // A creation notification must not enroll a different, already existing
+        // focused/main window. Tab drags can invalidate the transient element
+        // while focus moves to an unrelated destination in the same process.
+        // Do not follow AXWindow either: a reparented tab's containing window
+        // can also change while the deferred notification is being resolved.
+        return [element]
     }
 
     func setFrame(_ frame: CGRect, of window: ManagedWindow) {

@@ -1,3 +1,7 @@
+## Chromeタブ移動時の自動追加対策と終了経路（2026-10-23）
+
+自動追加の対象を生成通知のウィンドウ自身に限定し、左ボタン押下中の追加を待つ。復元失敗時は停止状態を明示し、別の確認を経て「復元せず終了」できるようにする。本体は `fix/restore-windows-on-quit` 起点の `fix/chrome-tab-transfer-and-quit-recovery`、追加テストは前回のテスト枝起点の `test/chrome-tab-transfer-and-quit-recovery` に分離し、developへ統合する。実Chromeでの原因確定・解消確認と実ダイアログの表示確認は未完了で、インストール済み版は更新しない。[調査・修正・検証の記録](docs/chrome-tab-transfer.md)。以下は以前の保存状態と履歴。
+
 ## 保存状態: main起点の3ブランチとdevelop（2026-10-22）
 
 バグ修正2本とテスト追加は、すべて未変更のmainから直接分岐する構成に作り直した。developもmainから作り、この3本を個別にマージ済み。旧積み上げコミットはローカルの `archive/stacked-20261022-*` タグに保全。push/PRは行わない。

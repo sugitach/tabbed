@@ -58,7 +58,7 @@ protocol WindowEngine: AnyObject {
     /// Frontmost visible standard-layer window from the window server.
     func frontmostWindowID() -> WindowID?
 
-    /// Candidate concrete windows for a newly-created AX window notification.
+    /// Only the notified window element; never app focus or a reparented child.
     func candidateWindowElements(from element: AXUIElement, pid: pid_t) -> [AXUIElement]
 
     /// Move/resize the window in AppKit screen coordinates.
