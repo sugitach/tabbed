@@ -14,11 +14,12 @@ OUT = HERE / 'results' / datetime.datetime.now(datetime.timezone.utc).strftime('
 OUT.mkdir(parents=True, exist_ok=False)
 SDK = Path('/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk')
 selected = {
-    'Sources/Accessibility/AXWindowEngine.swift': ('AXWindowEngine', ['isAlive'], ['isKnownClosed']),
+    'Sources/Accessibility/AXWindowEngine.swift': ('AXWindowEngine', ['isAlive', 'candidateWindowElements'], ['isKnownClosed']),
     'Sources/Group/TabGroupController.swift': ('TabGroupController', [], ['restoreWindowsForTermination']),
     'Sources/Group/TabGroupController+Workspace.swift': ('TabGroupController', ['pruneDeadWindows', 'applicationDidActivate', 'activeSpaceChanged'], []),
     'Sources/Group/TabGroupController+GroupOperations.swift': ('TabGroupController', ['remove', 'dissolve', 'untab'], []),
     'Sources/Group/TabGroupController+AXSync.swift': ('TabGroupController', ['handleWindowNotification'], []),
+    'Sources/Group/TabGroupController+WindowCreation.swift': ('TabGroupController', ['handleWindowCreated', 'resolveAndAutoAddWindow', 'targetGroupForNewWindow'], []),
     'Sources/App/AppDelegate.swift': ('AppDelegate', [], ['applicationShouldTerminate', 'applicationWillTerminate']),
 }
 
@@ -92,12 +93,14 @@ typecheck_code = run('production-typecheck', base + ['-module-name', 'Tabbed',
 (OUT/'XCTestDeclarations.swift').write_text('class XCTestCase {}\nfunc XCTAssertEqual<T: Equatable>(_ a: T, _ b: T, _ message: String = "") {}\n')
 (OUT/'XCTestAdapter.swift').write_text((SNAPSHOT/'Tests/WindowRestorationTests.swift').read_text().replace('import XCTest', ''))
 adapter_code = run('xctest-adapter-typecheck', base + ['-typecheck', OUT/'XCTestDeclarations.swift', OUT/'XCTestAdapter.swift'])
+summary = re.search(r'INTERNAL_RESULT: (\d+)/(\d+);', (OUT/'run.log').read_text()) if test_code is not None else None
 assert hashes == {str(p.relative_to(ROOT)): digest(p) for p in inputs}, 'Inputs changed during test'
 code = compile_code or typecheck_code or adapter_code or test_code or 0
 (OUT/'result.json').write_text(json.dumps({'status': 'PASS' if code == 0 else 'FAIL',
     'exitCode': code, 'compileExitCode': compile_code, 'testExitCode': test_code,
     'productionTypecheckExitCode': typecheck_code, 'adapterTypecheckExitCode': adapter_code,
-    'behaviorCases': 18, 'availableMethods': available,
+    'behaviorCases': int(summary[2]) if summary else None,
+    'passedBehaviorCases': int(summary[1]) if summary else None, 'availableMethods': available,
     'scope': 'Actual selected methods and optional Quit hooks; simulated AX/UI and termination, not real OS E2E or XCTest runner',
     'sourceUnchanged': True}, indent=2)+'\n')
 print('RESULT_DIR=' + str(OUT), flush=True)

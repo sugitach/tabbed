@@ -13,7 +13,16 @@ enum SimulatedAXError { case success, invalidUIElement, cannotComplete, apiDisab
     var resolved: UInt32
     var errors: [SimulatedAXError] = []
     var queries = 0
+    var standardWindow = true
+    var attributes: [String: AXUIElement] = [:]
+    static var applications: [Int32: AXUIElement] = [:]
     init(_ id: UInt32) { self.id = id; self.resolved = id }
+}
+@MainActor func AXUIElementCreateApplication(_ pid: Int32) -> AXUIElement {
+    if let existing = AXUIElement.applications[pid] { return existing }
+    let app = AXUIElement(0); app.standardWindow = false
+    AXUIElement.applications[pid] = app
+    return app
 }
 @MainActor func _AXUIElementGetWindow(_ element: AXUIElement, _ id: inout UInt32) -> SimulatedAXError {
     element.queries += 1
@@ -37,9 +46,9 @@ enum SimulatedAXError { case success, invalidUIElement, cannotComplete, apiDisab
     let element: AXUIElement
     var appName = "Regression fixture"
     var title = "Test window"
-    init(_ id: UInt32) {
-        self.id = id; pid = 100 + Int32(id); element = AXUIElement(id)
-        NSRunningApplication.terminated[pid] = false
+    init(_ id: UInt32, pid: Int32? = nil) {
+        self.id = id; self.pid = pid ?? 100 + Int32(id); element = AXUIElement(id)
+        NSRunningApplication.terminated[self.pid] = false
     }
 }
 @MainActor final class Probe {
@@ -69,6 +78,20 @@ enum SimulatedAXError { case success, invalidUIElement, cannotComplete, apiDisab
     var attempts: [UInt32] = []
     var writes: [(UInt32, CGRect)] = []
     var onRestore: (ManagedWindow, CGRect) -> Bool = { _, _ in true }
+    let ownPID: Int32 = 999
+    var availableWindows: [ManagedWindow] = []
+    var visibleWindows: Set<WindowID> = []
+    func copyAXElementAttribute(_ attribute: String, from element: AXUIElement) -> AXUIElement? {
+        element.attributes[attribute]
+    }
+    func isStandardWindow(_ element: AXUIElement) -> Bool { element.standardWindow }
+    func managedWindow(from element: AXUIElement, pid: Int32) -> ManagedWindow? {
+        availableWindows.first { $0.pid == pid && $0.element === element && element.standardWindow }
+    }
+    func onScreenWindowFrames(excluding: Set<WindowID>) -> [WindowFrame] {
+        availableWindows.filter { visibleWindows.contains($0.id) && !excluding.contains($0.id) }
+            .map { WindowFrame(id: $0.id) }
+    }
     func frame(of window: ManagedWindow) -> CGRect? { frames[window.id] }
     func restoreFrame(_ frame: CGRect, of window: ManagedWindow) -> Bool {
         Trace.add("restore.\(window.id)"); attempts.append(window.id)
@@ -80,6 +103,17 @@ enum SimulatedAXError { case success, invalidUIElement, cannotComplete, apiDisab
         writes.append((window.id, frame)); frames[window.id] = frame
     }
     func activate(_ window: ManagedWindow) { Trace.add("activate.\(window.id)") }
+}
+struct WindowFrame { let id: WindowID }
+@MainActor enum NSEvent { static var pressedMouseButtons = 0 }
+// Run the production retry callbacks deterministically, without a GUI run loop.
+@MainActor enum DispatchQueue {
+    static let main = ScheduledCallbacks()
+    @MainActor final class ScheduledCallbacks {
+        var pending: [() -> Void] = []
+        func asyncAfter(deadline: DispatchTime, execute: @escaping () -> Void) { pending.append(execute) }
+        func runNext() { if !pending.isEmpty { pending.removeFirst()() } }
+    }
 }
 @MainActor struct NSScreen {
     let visibleFrame: CGRect
@@ -96,23 +130,39 @@ let kAXUIElementDestroyedNotification = "destroyed"
 let kAXWindowMiniaturizedNotification = "minimized"
 let kAXMovedNotification = "moved"
 let kAXResizedNotification = "resized"
+let kAXFocusedWindowAttribute = "focusedWindow"
+let kAXMainWindowAttribute = "mainWindow"
+let kAXWindowAttribute = "window"
 
 // Only the optional normal-termination callbacks are modeled. No real app or UI.
 @MainActor final class NSApplication {
     enum TerminateReply { case terminateNow, terminateCancel }
+    enum ModalResponse { case alertFirstButtonReturn, alertSecondButtonReturn, abort }
 }
 @MainActor final class NSAlert {
+    struct Presentation {
+        let message: String
+        let information: String
+        let buttons: [String]
+    }
+    static var presentations: [Presentation] = []
+    static var responses: [NSApplication.ModalResponse] = []
     var messageText = ""
     var informativeText = ""
-    func addButton(withTitle title: String) {}
-    func runModal() {}
+    var buttons: [String] = []
+    func addButton(withTitle title: String) { buttons.append(title) }
+    @discardableResult func runModal() -> NSApplication.ModalResponse {
+        Self.presentations.append(Presentation(message: messageText, information: informativeText, buttons: buttons))
+        return Self.responses.isEmpty ? .alertFirstButtonReturn : Self.responses.removeFirst()
+    }
 }
 @MainActor final class AppDelegate {
     let controller: TabGroupController
+    var quitWithoutRestoring = false
     init(controller: TabGroupController) { self.controller = controller }
 }
-@MainActor func requestNormalQuit(_ controller: TabGroupController) -> NSApplication.TerminateReply {
-    let delegate = AppDelegate(controller: controller)
+@MainActor func requestNormalQuit(_ controller: TabGroupController, delegate supplied: AppDelegate? = nil) -> NSApplication.TerminateReply {
+    let delegate = supplied ?? AppDelegate(controller: controller)
     // An absent optional callback does nothing; never supply restoration in a double.
     var reply = NSApplication.TerminateReply.terminateNow
 #if HAS_SHOULD_TERMINATE
@@ -135,6 +185,13 @@ let kAXResizedNotification = "resized"
     var groups: [TabGroup] = []
     weak var mostRecentGroup: TabGroup?
     var draggedWindow: ManagedWindow?
+    let ownPID: Int32 = 999
+    var autoAddNewWindowsToStack = true
+    var addedWindows: [WindowID] = []
+    func frontmostGroup() -> TabGroup? { nil }
+    func add(_ window: ManagedWindow, to group: TabGroup) {
+        addedWindows.append(window.id); group.windows.append(window)
+    }
     func endTrackingActiveMove() { Trace.add("tracking.stop") }
     func resetDragState() { draggedWindow = nil; Trace.add("drag.reset") }
     func applyLayout(for group: TabGroup) { Trace.add("layout") }
