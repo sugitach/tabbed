@@ -56,7 +56,10 @@ enum SimulatedAXError { case success, invalidUIElement, cannotComplete, apiDisab
     var delegate: AnyObject?
     var onEvent: (() -> Void)? = {}
     var unobserved: [UInt32] = []
+    var startResult = true
+    var startCalls = 0
     init(_ name: String) { self.name = name }
+    func start() -> Bool { startCalls += 1; return startResult }
     func stop() { Trace.add(name + ".stop") }
     func unobserve(_ id: UInt32) { unobserved.append(id) }
     func unobserveAll() { Trace.add(name + ".unobserveAll") }
@@ -122,6 +125,8 @@ struct WindowFrame { let id: WindowID }
 @MainActor final class NSWorkspace {
     static let shared = NSWorkspace()
     let notificationCenter = Center()
+    var shownApps: [URL] = []
+    func activateFileViewerSelecting(_ urls: [URL]) { shownApps += urls }
     @MainActor final class Center {
         func removeObserver(_ object: AnyObject) { Trace.add("workspace.removeObserver") }
     }
@@ -137,7 +142,7 @@ let kAXWindowAttribute = "window"
 // Only the optional normal-termination callbacks are modeled. No real app or UI.
 @MainActor final class NSApplication {
     enum TerminateReply { case terminateNow, terminateCancel }
-    enum ModalResponse { case alertFirstButtonReturn, alertSecondButtonReturn, abort }
+    enum ModalResponse { case alertFirstButtonReturn, alertSecondButtonReturn, alertThirdButtonReturn, abort }
 }
 @MainActor final class NSAlert {
     struct Presentation {
@@ -159,8 +164,35 @@ let kAXWindowAttribute = "window"
 @MainActor final class AppDelegate {
     let controller: TabGroupController
     var quitWithoutRestoring = false
+    var monitoringStarted = false
+    var nextMonitoringAttempt = Date.distantPast
+    var permissionTimer: Timer?
+    var monitoringStatus = ""
+    var monitoringActive = false
+    var appBundleURL = URL(fileURLWithPath: "/Regression Fixture/Tabbed Dev.app")
+    var settingsRequests = 0
+#if HAS_PERMISSION_HELP
+    var codeSignature = AppCodeSignature(isAdHoc: true, validationSucceeded: true)
+#endif
     init(controller: TabGroupController) { self.controller = controller }
+    // UI presentation is a boundary double; startup decisions come from source.
+    func showMonitoringStatus(_ title: String, active: Bool) {
+        monitoringStatus = title; monitoringActive = active
+    }
+    func refreshStartup(now: Date) {
+#if HAS_PERMISSION_STARTUP
+        refreshAccessibilityStartup(now: now)
+#endif
+    }
+    func openAXSettings() { settingsRequests += 1 }
+    func presentPermissionHelp() {
+#if HAS_PERMISSION_HELP
+        showAccessibilityHelp()
+#endif
+    }
 }
+@MainActor enum AccessibilityPermission { static var trusted = false }
+@MainActor func AXIsProcessTrusted() -> Bool { AccessibilityPermission.trusted }
 @MainActor func requestNormalQuit(_ controller: TabGroupController, delegate supplied: AppDelegate? = nil) -> NSApplication.TerminateReply {
     let delegate = supplied ?? AppDelegate(controller: controller)
     // An absent optional callback does nothing; never supply restoration in a double.
@@ -181,6 +213,19 @@ let kAXWindowAttribute = "window"
     let dragMonitor = Probe("drag"), keyboardMonitor = Probe("key")
     let observer = Probe("window"), appFocusObserver = Probe("focus"), windowCreationObserver = Probe("creation")
     var isStopping = false
+    var isStarted = false
+    var startupObservers: [String] = []
+    func observeSpaceChanges() { startupObservers.append("space") }
+    func observeApplicationChanges() { startupObservers.append("application") }
+    func observeRunningAppsForWindowCreation() { startupObservers.append("creation") }
+    func startForTest() -> Bool {
+#if HAS_MONITORING_START_RESULT
+        return start()
+#else
+        start()
+        return false // Missing readiness contract must fail, not fake success.
+#endif
+    }
     var isApplyingLayout = false
     var groups: [TabGroup] = []
     weak var mostRecentGroup: TabGroup?

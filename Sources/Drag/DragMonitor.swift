@@ -27,8 +27,9 @@ final class DragMonitor {
         self.engine = engine
     }
 
-    func start() {
-        guard eventTap == nil else { return }
+    @discardableResult
+    func start() -> Bool {
+        guard eventTap == nil else { return true }
 
         let mask = Self.mask(for: [
             .leftMouseDown,
@@ -46,18 +47,23 @@ final class DragMonitor {
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
             NSLog("[DragMonitor] failed to create CGEventTap")
-            return
+            return false
         }
 
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             CFMachPortInvalidate(tap)
-            return
+            return false
         }
 
         eventTap = tap
         runLoopSource = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        guard CGEvent.tapIsEnabled(tap: tap) else {
+            stop()
+            return false
+        }
+        return true
     }
 
     func stop() {
@@ -71,6 +77,8 @@ final class DragMonitor {
         eventTap = nil
         runLoopSource = nil
         isTakingOverDrag = false
+        isMouseDown = false
+        pendingGesture = false
     }
 
     private func handle(type: CGEventType, event: CGEvent) -> CGEvent? {
