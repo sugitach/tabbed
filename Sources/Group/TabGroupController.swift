@@ -25,6 +25,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     }()
 
     private(set) var isStopping = false
+    private(set) var isStarted = false
     var groups: [TabGroup] = []
     var autoAddNewWindowsToStack = AppSettings.autoAddNewWindowsToStack
     var alwaysUseCompactMode = AppSettings.alwaysUseCompactMode
@@ -55,15 +56,23 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
         }
     }
 
-    func start() {
-        guard !isStopping else { return }
-        dragMonitor.start()
-        keyboardMonitor.start()
+    @discardableResult
+    func start() -> Bool {
+        guard !isStopping else { return false }
+        guard !isStarted else { return true }
+        guard dragMonitor.start(), keyboardMonitor.start() else {
+            // Do not leave a partially active controller while awaiting access.
+            dragMonitor.stop()
+            keyboardMonitor.stop()
+            return false
+        }
         observeSpaceChanges()
         observeApplicationChanges()
         if autoAddNewWindowsToStack {
             observeRunningAppsForWindowCreation()
         }
+        isStarted = true
+        return true
     }
 
     /// Re-read `~/.config/tabbed.toml` and apply any keyboard-shortcut changes.

@@ -11,6 +11,8 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     DispatchQueue.main.pending = []
     NSAlert.presentations = []
     NSAlert.responses = []
+    NSWorkspace.shared.shownApps = []
+    AccessibilityPermission.trusted = false
     NSScreen.screens = [NSScreen(visibleFrame: CGRect(x: 0, y: 24, width: 1000, height: 700))]
     let c = TabGroupController()
     c.dragMonitor.delegate = c; c.keyboardMonitor.delegate = c
@@ -353,6 +355,142 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     try check(c.engine.attempts == [1, 2] && c.groups.count == 1, "Dismissal must not discard restoration targets")
 }
 
+@MainActor func permissionGrantStartsWithoutRelaunch() throws {
+    let (c, _) = setup([]); let app = AppDelegate(controller: c)
+    let now = Date(timeIntervalSince1970: 100)
+    app.permissionTimer = Timer(timeInterval: 1, repeats: true) { _ in }
+    let timer = app.permissionTimer!
+    app.refreshStartup(now: now)
+    try check(c.dragMonitor.startCalls == 0 && !app.monitoringActive, "Denied access must not attempt monitoring")
+    AccessibilityPermission.trusted = true
+    app.refreshStartup(now: now.addingTimeInterval(1))
+    try check(app.monitoringStarted && app.monitoringActive && c.isStarted, "A new grant must start the same process")
+    try check(app.permissionTimer == nil && !timer.isValid, "Success must stop permission polling")
+    app.refreshStartup(now: now.addingTimeInterval(2))
+    try check(c.dragMonitor.startCalls == 1 && c.startupObservers.count == 3, "Repeated checks must not duplicate taps or observers")
+}
+
+@MainActor func tapFailureDoesNotClaimReadyAndCanRecover() throws {
+    let (c, _) = setup([]); let app = AppDelegate(controller: c)
+    let now = Date(timeIntervalSince1970: 100)
+    AccessibilityPermission.trusted = true
+    c.keyboardMonitor.startResult = false
+    app.permissionTimer = Timer(timeInterval: 1, repeats: true) { _ in }
+    app.refreshStartup(now: now)
+    try check(!app.monitoringStarted && !app.monitoringActive && !c.isStarted, "Trust alone must not claim working input monitoring")
+    try check(c.startupObservers.isEmpty && Trace.events == ["drag.stop", "key.stop"], "Failure must roll back both taps before observer setup")
+    try check(app.permissionTimer != nil && app.monitoringStatus.contains("retrying"), "Failure must keep polling and show retry status")
+    c.keyboardMonitor.startResult = true
+    app.refreshStartup(now: now.addingTimeInterval(1))
+    try check(c.dragMonitor.startCalls == 1, "Retry must be throttled")
+    app.refreshStartup(now: now.addingTimeInterval(5))
+    try check(app.monitoringActive && c.dragMonitor.startCalls == 2 && c.startupObservers.count == 3, "Transient tap failure must recover without relaunch")
+}
+
+@MainActor func deniedPermissionKeepsWaiting() throws {
+    let (c, _) = setup([]); let app = AppDelegate(controller: c)
+    for tick in 0..<10 { app.refreshStartup(now: Date(timeIntervalSince1970: Double(tick))) }
+    try check(c.dragMonitor.startCalls == 0 && !app.monitoringStarted && app.monitoringStatus.contains("Waiting"), "A stale/ungranted entry must never start or claim readiness")
+}
+
+@MainActor func firstTapFailurePreventsPartialStartup() throws {
+    let (c, _) = setup([]); c.dragMonitor.startResult = false
+    try check(!c.startForTest(), "Drag tap failure must be returned")
+    try check(c.keyboardMonitor.startCalls == 0 && c.startupObservers.isEmpty && Trace.events == ["drag.stop", "key.stop"], "First failure must stop both taps without registering observers")
+}
+
+@MainActor func controllerStartupIsIdempotent() throws {
+    let (c, _) = setup([]); c.autoAddNewWindowsToStack = false
+    try check(c.startForTest() && c.startForTest(), "A started controller must report ready")
+    try check(c.dragMonitor.startCalls == 1 && c.keyboardMonitor.startCalls == 1 && c.startupObservers == ["space", "application"], "Repeated start must not duplicate monitoring or enable disabled auto-add")
+}
+
+@MainActor func quittingWhileWaitingCancelsPolling() throws {
+    let (c, _) = setup([]); let app = AppDelegate(controller: c)
+    app.permissionTimer = Timer(timeInterval: 1, repeats: true) { _ in }
+    let timer = app.permissionTimer!
+    try check(requestNormalQuit(c, delegate: app) == .terminateNow, "Waiting app must still quit normally")
+    AccessibilityPermission.trusted = true
+    app.refreshStartup(now: Date())
+    try check(app.permissionTimer == nil && !timer.isValid && c.dragMonitor.startCalls == 0, "Queued check after Quit must not start monitoring")
+}
+
+@MainActor func cancelledQuitCannotResumePermissionStartup() throws {
+    let (c, _) = setup([2]); let app = AppDelegate(controller: c)
+    app.permissionTimer = Timer(timeInterval: 1, repeats: true) { _ in }
+    c.engine.onRestore = { _, _ in false }
+    try check(requestNormalQuit(c, delegate: app) == .terminateCancel, "Failed restoration must stay open")
+    AccessibilityPermission.trusted = true
+    app.refreshStartup(now: Date())
+    try check(app.permissionTimer == nil && !app.monitoringActive && c.dragMonitor.startCalls == 0 && !c.startForTest(), "Keep Open and late grants must not restart the stopped controller")
+}
+
+@MainActor func adHocGuidanceDoesNotClaimAnOldEntryIsProven() throws {
+#if HAS_PERMISSION_HELP
+    let message = AppCodeSignature(isAdHoc: true, validationSucceeded: true)
+        .accessibilityRecoveryMessage(appPath: "/Fixture/Tabbed Dev.app")
+    try check(message.contains("local ad-hoc signature") && message.contains("can still refer") && message.contains("cannot confirm"), "Signature diagnosis must distinguish an update possibility from a proven TCC entry")
+    try check(message.contains("already ON") && message.contains("press −") && message.contains("press +") && message.contains("Remove only Tabbed") && message.contains("/Fixture/Tabbed Dev.app"), "Recovery must identify the current app and conditionally explain removing/re-adding only Tabbed")
+#else
+    try check(false, "Production permission guidance is missing")
+#endif
+}
+
+@MainActor func unknownSignatureDoesNotInventASigningCause() throws {
+#if HAS_PERMISSION_HELP
+    for adHoc: Bool? in [nil, true, false] {
+        let message = AppCodeSignature(isAdHoc: adHoc, validationSucceeded: false)
+            .accessibilityRecoveryMessage(appPath: "/Fixture.app")
+        try check(message.contains("could not verify") && !message.contains("This build uses a local ad-hoc signature"), "Failed inspection must remain unknown even if metadata suggests ad-hoc signing")
+    }
+    let message = AppCodeSignature(isAdHoc: false, validationSucceeded: true)
+        .accessibilityRecoveryMessage(appPath: "/Fixture.app")
+    try check(!message.contains("ad-hoc") && message.contains("already ON"), "Other valid signatures still need generic recovery guidance without an ad-hoc claim")
+#else
+    try check(false, "Production signature diagnosis is missing")
+#endif
+}
+
+@MainActor func guidanceOpensSettingsOnlyOnExplicitChoice() throws {
+    let (c, _) = setup([]); let app = AppDelegate(controller: c)
+    NSAlert.responses = [.alertFirstButtonReturn]
+    app.presentPermissionHelp()
+    try check(NSAlert.presentations.count == 1 && app.settingsRequests == 1 && NSWorkspace.shared.shownApps.isEmpty, "Only the Settings choice may open/request permission")
+    let alert = NSAlert.presentations[0]
+    try check(alert.buttons == ["Open Accessibility Settings…", "Show Current App in Finder", "Not Now"] && alert.information.contains(app.appBundleURL.path), "Guidance must provide the exact current bundle and explicit actions")
+    try check(c.dragMonitor.startCalls == 0, "Guidance is not a permission grant")
+}
+
+@MainActor func guidanceCanRevealTheCurrentApp() throws {
+    let (c, _) = setup([]); let app = AppDelegate(controller: c)
+    NSAlert.responses = [.alertSecondButtonReturn]
+    app.presentPermissionHelp()
+    try check(NSWorkspace.shared.shownApps == [app.appBundleURL] && app.settingsRequests == 0, "Finder must reveal only the current app without requesting access")
+}
+
+@MainActor func dismissingGuidanceKeepsWaitingWithoutActions() throws {
+    for response: NSApplication.ModalResponse in [.alertThirdButtonReturn, .abort] {
+        let (c, _) = setup([]); let app = AppDelegate(controller: c)
+        app.permissionTimer = Timer(timeInterval: 1, repeats: true) { _ in }
+        NSAlert.responses = [response]
+        app.presentPermissionHelp()
+        for tick in 0..<3 { app.refreshStartup(now: Date(timeIntervalSince1970: Double(tick))) }
+        try check(NSAlert.presentations.count == 1 && app.settingsRequests == 0 && NSWorkspace.shared.shownApps.isEmpty, "Dismissal and polling must not open settings, reveal files or repeat the modal")
+        try check(app.permissionTimer?.isValid == true && c.dragMonitor.startCalls == 0, "Dismissing help must preserve safe permission polling")
+    }
+}
+
+@MainActor func grantedOrStoppedAppDoesNotShowStalePermissionGuidance() throws {
+    let (c, _) = setup([]); let app = AppDelegate(controller: c)
+    AccessibilityPermission.trusted = true
+    app.presentPermissionHelp()
+    try check(NSAlert.presentations.isEmpty && app.monitoringActive, "An already granted process must recheck startup rather than warn about stale entries")
+    let (stopped, _) = setup([]); let stoppedApp = AppDelegate(controller: stopped)
+    stopped.isStopping = true
+    stoppedApp.presentPermissionHelp()
+    try check(NSAlert.presentations.isEmpty && stoppedApp.settingsRequests == 0 && stopped.dragMonitor.startCalls == 0, "Stopped management must not prompt or resume via Help")
+}
+
 MainActor.assumeIsolated {
     let cases: [(String, () throws -> Void)] = [
         ("Quit continues across groups after failure", everyGroupIsAttemptedDespiteFailure),
@@ -388,6 +526,19 @@ MainActor.assumeIsolated {
         ("cancelled bypass retains recovery targets", cancelledBypassKeepsRecoveryTargets),
         ("aborted confirmation cannot approve bypass", abortedConfirmationCannotApproveBypass),
         ("dismissed warning cannot approve bypass", dismissedWarningCannotApproveBypass),
+        ("permission grant starts without relaunch", permissionGrantStartsWithoutRelaunch),
+        ("tap failure stays inactive and recovers", tapFailureDoesNotClaimReadyAndCanRecover),
+        ("denied permission keeps waiting", deniedPermissionKeepsWaiting),
+        ("first tap failure prevents partial startup", firstTapFailurePreventsPartialStartup),
+        ("controller startup is idempotent", controllerStartupIsIdempotent),
+        ("Quit while waiting cancels polling", quittingWhileWaitingCancelsPolling),
+        ("cancelled Quit cannot resume startup", cancelledQuitCannotResumePermissionStartup),
+        ("ad-hoc guidance does not claim proven stale registration", adHocGuidanceDoesNotClaimAnOldEntryIsProven),
+        ("unknown signature does not invent a cause", unknownSignatureDoesNotInventASigningCause),
+        ("permission guidance explicitly opens Settings", guidanceOpensSettingsOnlyOnExplicitChoice),
+        ("permission guidance reveals current app", guidanceCanRevealTheCurrentApp),
+        ("guidance dismissal keeps waiting without repetition", dismissingGuidanceKeepsWaitingWithoutActions),
+        ("granted/stopped apps skip stale permission guidance", grantedOrStoppedAppDoesNotShowStalePermissionGuidance),
     ]
     var failed = 0
     for (name, body) in cases {

@@ -6,6 +6,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var autoAddMenuItem: NSMenuItem?
     private var compactModeMenuItem: NSMenuItem?
+    private var monitoringStatusItem: NSMenuItem?
+    private var permissionTimer: Timer?
+    private var monitoringStarted = false
+    private var nextMonitoringAttempt = Date.distantPast
+    private lazy var codeSignature = AppCodeSignature.current()
+    private var appBundleURL: URL { Bundle.main.bundleURL }
     private let engine = AXWindowEngine()
     private lazy var controller = TabGroupController(engine: engine)
     private var quitWithoutRestoring = false
@@ -18,18 +24,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TabbedConfig.ensureFileExists()
         setUpStatusItem()
 
-        let trusted = ensureAccessibilityPermission()
+        let trusted = AXIsProcessTrusted()
         NSLog("[Tabbed] accessibility trusted = \(trusted)")
-        guard trusted else {
-            // Keep the menu item available while the user grants access.
-            statusItem?.button?.appearsDisabled = true
-            return
+        // The system prompt is asynchronous. Observe the actual grant rather
+        // than requiring the user to quit and relaunch after changing Settings.
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshAccessibilityStartup() }
         }
-        controller.start()
-        NSLog("[Tabbed] controller started — global ⌘-drag monitor active")
+        permissionTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        refreshAccessibilityStartup()
+        if !trusted { showAccessibilityHelp() }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        stopPermissionPolling()
+        showMonitoringStatus("Window management stopped", active: false)
         guard !quitWithoutRestoring else { return .terminateNow }
         let failures = controller.restoreWindowsForTermination()
         guard !failures.isEmpty else { return .terminateNow }
@@ -61,6 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        stopPermissionPolling()
         // Respect the confirmed escape path: a fallback must not move windows
         // again after the user explicitly chose to leave them as they are.
         guard !quitWithoutRestoring else { return }
@@ -78,7 +89,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image = NSImage(systemSymbolName: "rectangle.on.rectangle.angled",
                                      accessibilityDescription: "Tabbed")
         let menu = NSMenu()
-        menu.addItem(withTitle: "Tabbed", action: nil, keyEquivalent: "")
+        monitoringStatusItem = menu.addItem(withTitle: "Waiting for Accessibility Permission…", action: nil, keyEquivalent: "")
+        item.button?.appearsDisabled = true
         menu.addItem(.separator())
         let autoAddItem = menu.addItem(
             withTitle: "Auto-add New Windows to Stack",
@@ -106,6 +118,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(withTitle: "Open Accessibility Settings…",
                      action: #selector(openAXSettings), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Recheck Accessibility Permission",
+                     action: #selector(recheckAccessibilityPermission), keyEquivalent: "").target = self
+        menu.addItem(withTitle: "Accessibility Permission Help…",
+                     action: #selector(showAccessibilityHelp), keyEquivalent: "").target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Tabbed",
                      action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -134,11 +150,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openAXSettings() {
+        // Register/request access only as a result of an explicit user action.
+        // Dismiss our guidance first, so it does not cover the system prompt.
+        _ = ensureAccessibilityPermission()
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
         NSWorkspace.shared.open(url)
     }
 
     // MARK: - Permissions
+
+    @objc private func showAccessibilityHelp() {
+        guard !controller.isStopping else { return }
+        guard !AXIsProcessTrusted() else {
+            refreshAccessibilityStartup()
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Accessibility access is not active"
+        alert.informativeText = codeSignature.accessibilityRecoveryMessage(appPath: appBundleURL.path)
+        alert.addButton(withTitle: "Open Accessibility Settings…")
+        alert.addButton(withTitle: "Show Current App in Finder")
+        alert.addButton(withTitle: "Not Now")
+        let response = alert.runModal()
+        // Permission can change while the modal loop processes timer callbacks.
+        guard !controller.isStopping else { return }
+        if response == .alertFirstButtonReturn {
+            openAXSettings()
+        } else if response == .alertSecondButtonReturn {
+            NSWorkspace.shared.activateFileViewerSelecting([appBundleURL])
+        }
+    }
+
+    private func refreshAccessibilityStartup(now: Date = Date()) {
+        guard !monitoringStarted, !controller.isStopping else { return }
+        guard AXIsProcessTrusted() else {
+            showMonitoringStatus("Waiting for Accessibility Permission…", active: false)
+            return
+        }
+        // Trust can become visible before event taps can be created. Retry
+        // without repeatedly prompting, relaunching, or claiming readiness.
+        guard now >= nextMonitoringAttempt else { return }
+        nextMonitoringAttempt = now.addingTimeInterval(5)
+        guard controller.start() else {
+            showMonitoringStatus("Could not start event monitoring; retrying…", active: false)
+            return
+        }
+        monitoringStarted = true
+        stopPermissionPolling()
+        showMonitoringStatus("Tabbed — Window management active", active: true)
+        NSLog("[Tabbed] controller started — global ⌘-drag monitor active")
+    }
+
+    private func stopPermissionPolling() {
+        permissionTimer?.invalidate()
+        permissionTimer = nil
+    }
+
+    private func showMonitoringStatus(_ title: String, active: Bool) {
+        monitoringStatusItem?.title = title
+        statusItem?.button?.appearsDisabled = !active
+    }
+
+    @objc private func recheckAccessibilityPermission() {
+        nextMonitoringAttempt = .distantPast
+        refreshAccessibilityStartup()
+    }
 
     private func ensureAccessibilityPermission() -> Bool {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String

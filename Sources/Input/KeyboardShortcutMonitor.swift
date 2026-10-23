@@ -35,8 +35,9 @@ final class KeyboardShortcutMonitor {
         self.settings = settings
     }
 
-    func start() {
-        guard eventTap == nil, settings.enabled else { return }
+    @discardableResult
+    func start() -> Bool {
+        guard eventTap == nil, settings.enabled else { return true }
 
         let mask = CGEventMask(1) << CGEventType.keyDown.rawValue
         guard let tap = CGEvent.tapCreate(
@@ -48,18 +49,23 @@ final class KeyboardShortcutMonitor {
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else {
             NSLog("[KeyboardShortcutMonitor] failed to create CGEventTap")
-            return
+            return false
         }
 
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             CFMachPortInvalidate(tap)
-            return
+            return false
         }
 
         eventTap = tap
         runLoopSource = source
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        guard CGEvent.tapIsEnabled(tap: tap) else {
+            stop()
+            return false
+        }
+        return true
     }
 
     func stop() {

@@ -15,17 +15,18 @@ OUT.mkdir(parents=True, exist_ok=False)
 SDK = Path('/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk')
 selected = {
     'Sources/Accessibility/AXWindowEngine.swift': ('AXWindowEngine', ['isAlive', 'candidateWindowElements'], ['isKnownClosed']),
-    'Sources/Group/TabGroupController.swift': ('TabGroupController', [], ['restoreWindowsForTermination']),
+    'Sources/Group/TabGroupController.swift': ('TabGroupController', ['start'], ['restoreWindowsForTermination']),
     'Sources/Group/TabGroupController+Workspace.swift': ('TabGroupController', ['pruneDeadWindows', 'applicationDidActivate', 'activeSpaceChanged'], []),
     'Sources/Group/TabGroupController+GroupOperations.swift': ('TabGroupController', ['remove', 'dissolve', 'untab'], []),
     'Sources/Group/TabGroupController+AXSync.swift': ('TabGroupController', ['handleWindowNotification'], []),
     'Sources/Group/TabGroupController+WindowCreation.swift': ('TabGroupController', ['handleWindowCreated', 'resolveAndAutoAddWindow', 'targetGroupForNewWindow'], []),
-    'Sources/App/AppDelegate.swift': ('AppDelegate', [], ['applicationShouldTerminate', 'applicationWillTerminate']),
+    'Sources/App/AppDelegate.swift': ('AppDelegate', [], ['applicationShouldTerminate', 'applicationWillTerminate', 'refreshAccessibilityStartup', 'stopPermissionPolling', 'showAccessibilityHelp']),
 }
 
 def method(source, name, optional=False):
-    # Narrow extraction for these reviewed methods. Preserve exact method bodies.
-    hits = list(re.finditer(r'(?m)^    (?:@objc )?func ' + re.escape(name) + r'\(', source))
+    # Preserve exact bodies; remove declaration-only access/ObjC modifiers so
+    # the extracted behavior can be exercised across the test support files.
+    hits = list(re.finditer(r'(?m)^    (?:@objc )?(?:private )?func ' + re.escape(name) + r'\(', source))
     if not hits and optional:
         return None
     if len(hits) != 1:
@@ -36,7 +37,7 @@ def method(source, name, optional=False):
     for end in range(opening + 1, len(source)):
         if source[end] == '{': depth += 1
         elif source[end] == '}': depth -= 1
-        if depth == 0: return source[start:end + 1].replace('@objc ', '', 1)
+        if depth == 0: return source[start:end + 1].replace('@objc ', '', 1).replace('private func ', 'func ', 1)
     raise SystemExit('Unbalanced method: ' + name)
 
 inputs = sorted(p for p in (ROOT/'Sources').rglob('*') if p.is_file() and p.suffix in {'.swift', '.h'}) + [
@@ -65,8 +66,12 @@ for path, (owner, required, optional) in selected.items():
 (OUT/'main.swift').write_bytes((SNAPSHOT/'Tests/Regression/main.swift').read_bytes())
 flags = []
 for name, flag in [('applicationShouldTerminate', 'HAS_SHOULD_TERMINATE'),
-                   ('applicationWillTerminate', 'HAS_WILL_TERMINATE')]:
+                   ('applicationWillTerminate', 'HAS_WILL_TERMINATE'),
+                   ('refreshAccessibilityStartup', 'HAS_PERMISSION_STARTUP'),
+                   ('showAccessibilityHelp', 'HAS_PERMISSION_HELP')]:
     if available[name]: flags += ['-D', flag]
+if 'func start() -> Bool' in (SNAPSHOT/'Sources/Group/TabGroupController.swift').read_text():
+    flags += ['-D', 'HAS_MONITORING_START_RESULT']
 commands = []
 def run(label, argv):
     argv = list(map(str, argv)); commands.append({'label': label, 'argv': argv})
@@ -81,6 +86,8 @@ base = ['/usr/bin/xcrun', '--sdk', SDK, 'swiftc', '-swift-version', '5',
         '-target', 'arm64-apple-macosx14.0', '-sdk', SDK, '-module-cache-path', OUT/'module-cache']
 production_policy = SNAPSHOT/'Sources/Group/WindowRestoration.swift'
 policy_sources = [production_policy] if production_policy.is_file() else []
+signature_source = SNAPSHOT/'Sources/App/AppCodeSignature.swift'
+if signature_source.is_file(): policy_sources.append(signature_source)
 compile_code = run('compile', base + flags + policy_sources + [SNAPSHOT/'Tests/Regression/Support.swift',
                    OUT/'ProductionMethods.swift', OUT/'main.swift', '-o', OUT/'internal-tests'])
 test_code = run('run', [OUT/'internal-tests']) if compile_code == 0 else None
