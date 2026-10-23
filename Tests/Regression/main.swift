@@ -7,6 +7,10 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
 }
 @MainActor func setup(_ sizes: [Int] = [3]) -> (TabGroupController, [ManagedWindow]) {
     Trace.events = []; NSRunningApplication.terminated = [:]
+    AXUIElement.applications = [:]; NSEvent.pressedMouseButtons = 0
+    DispatchQueue.main.pending = []
+    NSAlert.presentations = []
+    NSAlert.responses = []
     NSScreen.screens = [NSScreen(visibleFrame: CGRect(x: 0, y: 24, width: 1000, height: 700))]
     let c = TabGroupController()
     c.dragMonitor.delegate = c; c.keyboardMonitor.delegate = c
@@ -193,6 +197,162 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     try check([1, 2, 3].allSatisfy { c.engine.frames[UInt32($0)] == frame }, "Existing negative-coordinate display must be preserved")
 }
 
+@MainActor func windowCreationDoesNotAdoptUnrelatedFocusedWindow() throws {
+    let (c, _) = setup([2])
+    let destination = ManagedWindow(90)
+    let app = AXUIElementCreateApplication(destination.pid)
+    app.attributes[kAXFocusedWindowAttribute] = destination.element
+    app.attributes[kAXMainWindowAttribute] = destination.element
+    c.engine.availableWindows = [destination]; c.engine.visibleWindows = [destination.id]
+    let invalidNotification = AXUIElement(91); invalidNotification.standardWindow = false
+    c.resolveAndAutoAddWindow(pid: destination.pid, element: invalidNotification, attemptsRemaining: 0)
+    try check(c.addedWindows.isEmpty, "Unresolved creation must not enroll the unrelated focused/main Chrome window")
+}
+
+@MainActor func closedCreationDoesNotAdoptFocusedDestination() throws {
+    let (c, _) = setup([2])
+    let temporary = ManagedWindow(90), destination = ManagedWindow(91, pid: 190)
+    let app = AXUIElementCreateApplication(temporary.pid)
+    app.attributes[kAXFocusedWindowAttribute] = destination.element
+    app.attributes[kAXMainWindowAttribute] = destination.element
+    // The transient notification no longer resolves; a different window in the
+    // same Chrome process is now focused and still visible.
+    c.engine.availableWindows = [destination]; c.engine.visibleWindows = [destination.id]
+    c.resolveAndAutoAddWindow(pid: temporary.pid, element: temporary.element, attemptsRemaining: 0)
+    try check(c.addedWindows.isEmpty, "Destroyed transient must not be replaced by the focused destination")
+}
+
+@MainActor func directCreatedWindowStillAutoAdds() throws {
+    let (c, _) = setup([2]); let created = ManagedWindow(90)
+    c.engine.availableWindows = [created]; c.engine.visibleWindows = [created.id]
+    c.resolveAndAutoAddWindow(pid: created.pid, element: created.element, attemptsRemaining: 0)
+    try check(c.addedWindows == [90], "An ordinary visible created window must still auto-add")
+}
+
+@MainActor func notificationChildCannotEnrollItsContainingWindow() throws {
+    let (c, _) = setup([2]); let created = ManagedWindow(90), unrelated = ManagedWindow(91, pid: 190)
+    let child = AXUIElement(92); child.standardWindow = false
+    child.attributes[kAXWindowAttribute] = created.element
+    let app = AXUIElementCreateApplication(created.pid)
+    app.attributes[kAXFocusedWindowAttribute] = unrelated.element
+    c.engine.availableWindows = [created, unrelated]; c.engine.visibleWindows = [90, 91]
+    c.resolveAndAutoAddWindow(pid: created.pid, element: child, attemptsRemaining: 0)
+    try check(c.addedWindows.isEmpty, "Non-window notification cannot enroll a containing window that could change during tab reparenting")
+}
+
+@MainActor func creationDuringDragDoesNotAutoAdd() throws {
+    let (c, _) = setup([2]); let transient = ManagedWindow(90)
+    c.engine.availableWindows = [transient]; c.engine.visibleWindows = [transient.id]
+    NSEvent.pressedMouseButtons = 1
+    c.resolveAndAutoAddWindow(pid: transient.pid, element: transient.element, attemptsRemaining: 0)
+    try check(c.addedWindows.isEmpty, "Auto-add must not take over a window during an app's own mouse drag")
+}
+
+@MainActor func releasedDragRechecksOriginalElement() throws {
+    let (c, _) = setup([2]); let transient = ManagedWindow(90)
+    c.engine.availableWindows = [transient]; c.engine.visibleWindows = [transient.id]
+    NSEvent.pressedMouseButtons = 1
+    c.handleWindowCreated(pid: transient.pid, element: transient.element)
+    let premature = c.addedWindows
+    NSEvent.pressedMouseButtons = 0
+    c.engine.visibleWindows = []
+    DispatchQueue.main.runNext()
+    try check(premature.isEmpty && c.addedWindows.isEmpty, "Drag release must not auto-add a vanished/offscreen transient")
+    c.engine.visibleWindows = [transient.id]
+    DispatchQueue.main.runNext()
+    try check(c.addedWindows == [90], "A surviving visible new window can auto-add after drag release")
+}
+
+@MainActor func dragRetriesAreBounded() throws {
+    let (c, _) = setup([2]); let transient = ManagedWindow(90)
+    c.engine.availableWindows = [transient]; c.engine.visibleWindows = [90]
+    NSEvent.pressedMouseButtons = 1
+    c.handleWindowCreated(pid: transient.pid, element: transient.element)
+    for _ in 0..<3 {
+        try check(DispatchQueue.main.pending.count == 1, "Only one bounded retry should be pending")
+        DispatchQueue.main.runNext()
+    }
+    try check(DispatchQueue.main.pending.isEmpty && c.addedWindows.isEmpty, "Long drag must exhaust retries without taking over its window")
+}
+
+@MainActor func delayedCreationHonorsDisabledAutoAdd() throws {
+    let (c, _) = setup([2]); let transient = ManagedWindow(90)
+    c.engine.availableWindows = [transient]; c.engine.visibleWindows = [90]
+    NSEvent.pressedMouseButtons = 1
+    c.handleWindowCreated(pid: transient.pid, element: transient.element)
+    c.autoAddNewWindowsToStack = false; NSEvent.pressedMouseButtons = 0
+    DispatchQueue.main.runNext()
+    try check(c.addedWindows.isEmpty && DispatchQueue.main.pending.isEmpty, "Disabling auto-add must cancel already queued adoption")
+}
+
+@MainActor func autoAddOffAndShutdownIgnoreCreation() throws {
+    for stopping in [false, true] {
+        let (c, _) = setup([2]); let created = ManagedWindow(90)
+        c.engine.availableWindows = [created]; c.engine.visibleWindows = [created.id]
+        c.autoAddNewWindowsToStack = stopping; c.isStopping = stopping
+        c.handleWindowCreated(pid: created.pid, element: created.element)
+        try check(c.addedWindows.isEmpty, "Auto-add off or stopped must leave unrelated new windows alone")
+    }
+}
+
+@MainActor func failedQuitExplainsThatManagementRemainsStopped() throws {
+    let (c, _) = setup([2])
+    c.engine.onRestore = { window, _ in window.id != 2 }
+    try check(requestNormalQuit(c) == .terminateCancel, "Failed restoration must keep the application open")
+    let alerts = NSAlert.presentations
+    try check(alerts.count == 2, "Keep Open must be followed by an explicit stopped-state notice")
+    try check(alerts[0].buttons == ["Keep Open", "Quit Without Restoring…"], "Keeping open must be the default, with an explicit escape path")
+    try check(alerts[1].message == "Tabbed is still running" && alerts[1].information.contains("⌘-drag are stopped") && alerts[1].information.contains("Some windows may still need restoration") && alerts[1].information.contains("Quit Tabbed"), "Follow-up must explain running/stopped state, pending restoration, and how to exit")
+    try check(c.isStopping && c.groups.count == 1 && c.engine.attempts == [1, 2], "Acknowledging the notice must not resume management, clear targets, or repeat restoration")
+    c.engine.onRestore = { _, _ in true }; NSAlert.presentations = []
+    try check(requestNormalQuit(c) == .terminateNow && NSAlert.presentations.isEmpty, "A later successful Quit must exit without another stopped-state notice")
+}
+
+@MainActor func successfulQuitDoesNotShowStoppedNotice() throws {
+    let (c, _) = setup([2])
+    NSAlert.responses = [.alertSecondButtonReturn, .alertSecondButtonReturn]
+    try check(requestNormalQuit(c) == .terminateNow && NSAlert.presentations.isEmpty, "Successful restoration must quit without Keep Open or a misleading running notice")
+    try check(NSAlert.responses.count == 2, "Successful restoration must not ask for a bypass decision")
+}
+
+@MainActor func confirmedQuitDoesNotRestoreAgainDuringTermination() throws {
+    let (c, _) = setup([2]); let delegate = AppDelegate(controller: c)
+    c.engine.onRestore = { _, _ in false }
+    NSAlert.responses = [.alertSecondButtonReturn, .alertSecondButtonReturn]
+    try check(requestNormalQuit(c, delegate: delegate) == .terminateNow, "An explicitly confirmed bypass must allow exit despite failed restoration")
+    try check(NSAlert.presentations.count == 2, "Bypass must show a separate confirmation and no Keep Open notice")
+    let confirmation = NSAlert.presentations[1]
+    try check(confirmation.buttons == ["Cancel", "Quit Without Restoring"] && confirmation.information.contains("offscreen"), "Confirmation must default to Cancel and disclose unrecovered windows")
+    try check(c.engine.attempts == [1, 2] && c.engine.writes.isEmpty, "The termination fallback must not retry writes after bypass confirmation")
+    try check(c.isStopping && c.groups.count == 1 && c.dragMonitor.delegate == nil, "Explicit exit must not reactivate management or fake a successful restoration")
+    NSAlert.presentations = []
+    try check(requestNormalQuit(c, delegate: delegate) == .terminateNow && c.engine.attempts == [1, 2] && NSAlert.presentations.isEmpty, "Repeated termination callbacks after confirmation must not move windows or prompt again")
+}
+
+@MainActor func cancelledBypassKeepsRecoveryTargets() throws {
+    let (c, _) = setup([2]); let delegate = AppDelegate(controller: c)
+    c.engine.onRestore = { _, _ in false }
+    NSAlert.responses = [.alertSecondButtonReturn, .alertFirstButtonReturn, .alertFirstButtonReturn]
+    try check(requestNormalQuit(c, delegate: delegate) == .terminateCancel, "Cancelling bypass confirmation must keep the app open")
+    try check(NSAlert.presentations.count == 3 && c.isStopping && c.groups.count == 1 && c.engine.attempts == [1, 2], "Cancel must retain targets, explain stopped state, and perform no extra restoration")
+    c.engine.onRestore = { _, _ in true }; c.engine.attempts = []; NSAlert.presentations = []
+    try check(requestNormalQuit(c, delegate: delegate) == .terminateNow && c.engine.attempts == [1, 2] && NSAlert.presentations.isEmpty, "A cancelled bypass must not disable later normal restoration")
+}
+
+@MainActor func abortedConfirmationCannotApproveBypass() throws {
+    let (c, _) = setup([2]); c.engine.onRestore = { _, _ in false }
+    NSAlert.responses = [.alertSecondButtonReturn, .abort, .alertFirstButtonReturn]
+    try check(requestNormalQuit(c) == .terminateCancel && NSAlert.presentations.count == 3, "An unexpected confirmation response must never authorize bypass")
+    try check(c.engine.attempts == [1, 2] && c.groups.count == 1, "Aborted confirmation must retain the recovery targets without retrying writes")
+}
+
+@MainActor func dismissedWarningCannotApproveBypass() throws {
+    let (c, _) = setup([2]); c.engine.onRestore = { _, _ in false }
+    NSAlert.responses = [.abort, .alertFirstButtonReturn]
+    try check(requestNormalQuit(c) == .terminateCancel && NSAlert.presentations.count == 2, "Dismissing the initial warning must keep the app stopped and open")
+    try check(c.engine.attempts == [1, 2] && c.groups.count == 1, "Dismissal must not discard restoration targets")
+}
+
 MainActor.assumeIsolated {
     let cases: [(String, () throws -> Void)] = [
         ("Quit continues across groups after failure", everyGroupIsAttemptedDespiteFailure),
@@ -213,6 +373,21 @@ MainActor.assumeIsolated {
         ("stopped callbacks preserve targets", stoppedCallbacksCannotDropOrRelayoutWindows),
         ("explicit untab keeps offset", explicitUntabKeepsExistingOffset),
         ("single survivor dissolves", oneRemainingWindowDissolvesSafely),
+        ("creation cannot adopt unrelated focused/main window", windowCreationDoesNotAdoptUnrelatedFocusedWindow),
+        ("closed transient cannot adopt focused destination", closedCreationDoesNotAdoptFocusedDestination),
+        ("ordinary created window still auto-adds", directCreatedWindowStillAutoAdds),
+        ("notification child cannot enroll its containing window", notificationChildCannotEnrollItsContainingWindow),
+        ("creation during mouse drag cannot auto-add", creationDuringDragDoesNotAutoAdd),
+        ("drag release rechecks original window", releasedDragRechecksOriginalElement),
+        ("drag retries remain bounded", dragRetriesAreBounded),
+        ("delayed creation honors disabled auto-add", delayedCreationHonorsDisabledAutoAdd),
+        ("disabled/stopped auto-add ignores creation", autoAddOffAndShutdownIgnoreCreation),
+        ("failed Quit explains running/stopped state", failedQuitExplainsThatManagementRemainsStopped),
+        ("successful Quit has no stopped-state notice", successfulQuitDoesNotShowStoppedNotice),
+        ("confirmed exit skips further restoration", confirmedQuitDoesNotRestoreAgainDuringTermination),
+        ("cancelled bypass retains recovery targets", cancelledBypassKeepsRecoveryTargets),
+        ("aborted confirmation cannot approve bypass", abortedConfirmationCannotApproveBypass),
+        ("dismissed warning cannot approve bypass", dismissedWarningCannotApproveBypass),
     ]
     var failed = 0
     for (name, body) in cases {

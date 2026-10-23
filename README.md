@@ -1,3 +1,9 @@
+## Chromeタブ移動と復元失敗後の終了経路の回帰（2026-10-23）
+
+前回の `test/window-restoration-and-guest-e2e` 起点の `test/chrome-tab-transfer-and-quit-recovery` で、内部回帰を18件から33件へ拡張する。本体修正は `fix/restore-windows-on-quit` 起点の `fix/chrome-tab-transfer-and-quit-recovery` に分離する。このテスト枝はSourcesを変更しないため、単独では未修正の振る舞いを失敗として検出する。両枝をdevelopへ統合して全33件の成功を確認する。実Chrome・ダイアログのE2E成功とは扱わず、VM試験やインストール更新は行わない。
+
+テスト枝単独での検証：テスト実行体のコンパイル・本体全体の型検査・XCTestアダプターの宣言shim型検査が成功。回帰は4/33成功で、未取り込みの本体修正を29件の失敗として検出した。ローカル証拠は `Tests/Regression/results/20261023T023412627848Z/`。この結果は統合したdevelopの結果とは区別する。
+
 ## 保存状態: main起点の3ブランチとdevelop（2026-10-22）
 
 バグ修正2本とテスト追加は、すべて未変更のmainから直接分岐する構成に作り直した。developもmainから作り、この3本を個別にマージする。旧積み上げコミットはローカルの `archive/stacked-20261022-*` タグに保全。push/PRは行わない。
