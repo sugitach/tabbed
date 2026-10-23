@@ -56,20 +56,26 @@ extension TabGroupController {
     }
 
     func resolveAndAutoAddWindow(pid: pid_t, element: AXUIElement, attemptsRemaining: Int) {
-        guard !isStopping else { return }
-        let candidates = engine.candidateWindowElements(from: element, pid: pid)
-        let onScreen = Set(engine.onScreenWindowFrames(excluding: []).map { $0.id })
-        let window = candidates
-            .compactMap { engine.managedWindow(from: $0, pid: pid) }
-            .first { group(containing: $0.id) == nil && onScreen.contains($0.id) }
+        // A delayed retry may outlive disabling auto-add or removing a group.
+        guard !isStopping, autoAddNewWindowsToStack, pid != ownPID, !groups.isEmpty else { return }
+        // Do not take over transient windows while another app owns a mouse
+        // drag (for example Chrome tearing a tab out into a temporary window).
+        // Reuse the bounded retry below; if the drag outlasts it, skip auto-add.
+        if NSEvent.pressedMouseButtons & 1 == 0 {
+            let candidates = engine.candidateWindowElements(from: element, pid: pid)
+            let onScreen = Set(engine.onScreenWindowFrames(excluding: []).map { $0.id })
+            let window = candidates
+                .compactMap { engine.managedWindow(from: $0, pid: pid) }
+                .first { group(containing: $0.id) == nil && onScreen.contains($0.id) }
 
-        if let window, let target = targetGroupForNewWindow() {
-            add(window, to: target)
-            return
-        }
+            if let window, let target = targetGroupForNewWindow() {
+                add(window, to: target)
+                return
+            }
 
-        if window != nil {
-            return
+            if window != nil {
+                return
+            }
         }
 
         guard attemptsRemaining > 0 else { return }
