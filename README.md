@@ -1,3 +1,7 @@
+## Window-switch diagnostics (in progress, 2026-10-23)
+
+An opt-in local trace is being prepared for unexpected resizing, visible inactive windows, stale closed-window tabs, and bottom-right movement. It records IDs, geometry, AX results, and notification ordering without titles, URLs, or page content. This is diagnostic instrumentation, not a verified fix; live Chrome/Incognito testing remains pending. See [recording steps and limitations](docs/window-diagnostics.md).
+
 ## Accessibility許可後の監視開始と再登録案内（2026-10-23）
 
 許可ON後の自動監視開始と、自身の署名を確認して古い登録の削除・再登録を案内するダイアログを追加した。非GUI回帰46/46・本体ビルド・署名読み取り試験は成功し、実際の案内表示と権限切替は未検証。旧登録の検出・削除を自動化したわけではなく、証明書方式も変更していない。インストール済み版・権限・キーチェーンは未変更。[変更・根拠・未確認点](docs/accessibility-startup.md)。以下は以前の履歴。

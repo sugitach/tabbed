@@ -3,7 +3,7 @@ import CoreGraphics
 
 // Deliberate test doubles. No AppKit/ApplicationServices import or OS window access.
 typealias WindowID = UInt32
-enum SimulatedAXError { case success, invalidUIElement, cannotComplete, apiDisabled, failure, notImplemented }
+enum SimulatedAXError: Int32 { case success, invalidUIElement, cannotComplete, apiDisabled, failure, notImplemented }
 @MainActor enum Trace {
     static var events: [String] = []
     static func add(_ event: String) { events.append(event) }
@@ -68,6 +68,7 @@ enum SimulatedAXError { case success, invalidUIElement, cannotComplete, apiDisab
     func hide() { Trace.add("panel.hide") }
 }
 @MainActor final class TabGroup {
+    let id = UUID()
     var windows: [ManagedWindow]
     var activeIndex = 0
     var contentFrame: CGRect

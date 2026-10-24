@@ -51,14 +51,23 @@ final class AXWindowEngine: WindowEngine {
     func frame(of window: ManagedWindow) -> CGRect? {
         guard let position = copyCGPointAttribute(kAXPositionAttribute, from: window.element),
               let size = copyCGSizeAttribute(kAXSizeAttribute, from: window.element) else {
+            WindowDiagnostics.record(.init(event: .frameRead, windowID: window.id, pid: window.pid,
+                reason: .unavailable, source: .accessibility))
             return nil
         }
 
-        return CoordinateConverter.appKitFrame(fromCG: CGRect(origin: position, size: size))
+        let frame = CoordinateConverter.appKitFrame(fromCG: CGRect(origin: position, size: size))
+        WindowDiagnostics.record(.init(event: .frameRead, windowID: window.id, pid: window.pid,
+            axFrame: WindowDiagnostics.frame(frame), source: .accessibility))
+        return frame
     }
 
     func windowServerFrame(of id: WindowID) -> CGRect? {
-        WindowServerSnapshot.window(id: id)?.frame
+        let snapshot = WindowServerSnapshot.window(id: id)
+        WindowDiagnostics.record(.init(event: .frameRead, windowID: id, pid: snapshot?.pid,
+            resolvedWindowID: snapshot?.id, cgFrame: WindowDiagnostics.frame(snapshot?.frame),
+            source: .windowServer))
+        return snapshot?.frame
     }
 
     func focusedOrMainWindowID(for pid: pid_t) -> WindowID? {
@@ -90,18 +99,29 @@ final class AXWindowEngine: WindowEngine {
     }
 
     func setFrame(_ frame: CGRect, of window: ManagedWindow) {
+        WindowDiagnostics.record(.init(event: .frameRequest, windowID: window.id, pid: window.pid,
+            requestedFrame: WindowDiagnostics.frame(frame)))
         let cgFrame = CoordinateConverter.cgFrame(fromAppKit: frame)
-        setCGSizeAttribute(kAXSizeAttribute, value: cgFrame.size, on: window.element)
-        setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
+        let sizeStatus = setCGSizeAttribute(kAXSizeAttribute, value: cgFrame.size, on: window.element)
+        let positionStatus = setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
+        WindowDiagnostics.record(.init(event: .frameResult, windowID: window.id, pid: window.pid,
+            requestedFrame: WindowDiagnostics.frame(frame), sizeStatus: sizeStatus.rawValue,
+            positionStatus: positionStatus.rawValue))
     }
 
     func isKnownClosed(_ window: ManagedWindow) -> Bool {
         guard let app = NSRunningApplication(processIdentifier: window.pid), !app.isTerminated else {
+            WindowDiagnostics.record(.init(event: .closureCheck, windowID: window.id, pid: window.pid,
+                reason: .applicationGone))
             return true
         }
         AXUIElementSetMessagingTimeout(window.element, 1.0)
         var resolved = CGWindowID(0)
         let error = _AXUIElementGetWindow(window.element, &resolved)
+        WindowDiagnostics.record(.init(event: .closureCheck, windowID: window.id, pid: window.pid,
+            resolvedWindowID: resolved, status: error.rawValue,
+            reason: error == .invalidUIElement ? .invalidElement
+                : (error == .success ? (resolved == window.id ? .identityMatches : .identityChanged) : .unknown)))
         // Timeout/permission errors are unknown, not evidence that the window closed.
         return error == .invalidUIElement || (error == .success && resolved != window.id)
     }
@@ -109,9 +129,9 @@ final class AXWindowEngine: WindowEngine {
     func restoreFrame(_ frame: CGRect, of window: ManagedWindow) -> Bool {
         AXUIElementSetMessagingTimeout(window.element, 1.0)
         let cgFrame = CoordinateConverter.cgFrame(fromAppKit: frame)
-        let resized = setCGSizeAttribute(kAXSizeAttribute, value: cgFrame.size, on: window.element)
+        let resized = setCGSizeAttribute(kAXSizeAttribute, value: cgFrame.size, on: window.element) == .success
         // Attempt position even when resizing fails, to recover as much as possible.
-        let moved = setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
+        let moved = setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element) == .success
         guard resized, moved, let actual = self.frame(of: window) else { return false }
         return abs(actual.minX - frame.minX) <= 2 && abs(actual.minY - frame.minY) <= 2
             && abs(actual.width - frame.width) <= 2 && abs(actual.height - frame.height) <= 2
@@ -124,10 +144,34 @@ final class AXWindowEngine: WindowEngine {
     func activate(_ window: ManagedWindow) {
         let appElement = AXUIElementCreateApplication(window.pid)
         AXUIElementSetMessagingTimeout(appElement, 1.0)
+        recordActivationState(window, appElement: appElement, reason: .beforeActivation)
         AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window.element)
         AXUIElementSetAttributeValue(window.element, kAXMainAttribute as CFString, kCFBooleanTrue)
         raise(window)
         NSRunningApplication(processIdentifier: window.pid)?.activate(options: [])
+        recordActivationState(window, appElement: appElement, reason: .afterActivation)
+    }
+
+    /// Extra reads happen only at explicit tab activation while recording.
+    /// No Enhanced UI/minimized attribute is changed by diagnostics.
+    private func recordActivationState(_ window: ManagedWindow, appElement: AXUIElement,
+                                       reason: WindowDiagnosticEntry.Reason) {
+        guard WindowDiagnostics.isRecording else { return }
+        var resolved = CGWindowID(0)
+        let identityStatus = _AXUIElementGetWindow(window.element, &resolved)
+        let axFrame = frame(of: window)
+        let cgFrame = WindowServerSnapshot.window(id: window.id)?.frame
+        WindowDiagnostics.record(.init(event: .activationState, windowID: window.id, pid: window.pid,
+            resolvedWindowID: resolved, axFrame: WindowDiagnostics.frame(axFrame),
+            cgFrame: WindowDiagnostics.frame(cgFrame), status: identityStatus.rawValue,
+            minimized: copyBoolAttribute(kAXMinimizedAttribute, from: window.element),
+            enhancedUI: copyBoolAttribute("AXEnhancedUserInterface", from: appElement), reason: reason))
+    }
+
+    private func copyBoolAttribute(_ attribute: String, from element: AXUIElement) -> Bool? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success else { return nil }
+        return value as? Bool
     }
 
     func isAlive(_ window: ManagedWindow) -> Bool {
@@ -250,17 +294,25 @@ final class AXWindowEngine: WindowEngine {
     }
 
     @discardableResult
-    private func setCGPointAttribute(_ attribute: String, value: CGPoint, on element: AXUIElement) -> Bool {
+    private func setCGPointAttribute(_ attribute: String, value: CGPoint, on element: AXUIElement) -> AXError {
         var mutableValue = value
-        guard let axValue = AXValueCreate(.cgPoint, &mutableValue) else { return false }
-        return AXUIElementSetAttributeValue(element, attribute as CFString, axValue) == .success
+        guard let axValue = AXValueCreate(.cgPoint, &mutableValue) else {
+            WindowDiagnostics.record(.init(event: .frameResult, positionStatus: AXError.failure.rawValue,
+                reason: .valueEncodingFailed))
+            return .failure
+        }
+        return AXUIElementSetAttributeValue(element, attribute as CFString, axValue)
     }
 
     @discardableResult
-    private func setCGSizeAttribute(_ attribute: String, value: CGSize, on element: AXUIElement) -> Bool {
+    private func setCGSizeAttribute(_ attribute: String, value: CGSize, on element: AXUIElement) -> AXError {
         var mutableValue = value
-        guard let axValue = AXValueCreate(.cgSize, &mutableValue) else { return false }
-        return AXUIElementSetAttributeValue(element, attribute as CFString, axValue) == .success
+        guard let axValue = AXValueCreate(.cgSize, &mutableValue) else {
+            WindowDiagnostics.record(.init(event: .frameResult, sizeStatus: AXError.failure.rawValue,
+                reason: .valueEncodingFailed))
+            return .failure
+        }
+        return AXUIElementSetAttributeValue(element, attribute as CFString, axValue)
     }
 
 }

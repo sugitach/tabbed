@@ -88,6 +88,10 @@ production_policy = SNAPSHOT/'Sources/Group/WindowRestoration.swift'
 policy_sources = [production_policy] if production_policy.is_file() else []
 signature_source = SNAPSHOT/'Sources/App/AppCodeSignature.swift'
 if signature_source.is_file(): policy_sources.append(signature_source)
+diagnostic_source = SNAPSHOT/'Sources/App/WindowDiagnostics.swift'
+if diagnostic_source.is_file():
+    policy_sources.append(diagnostic_source)
+    flags += ['-D', 'HAS_WINDOW_DIAGNOSTICS']
 compile_code = run('compile', base + flags + policy_sources + [SNAPSHOT/'Tests/Regression/Support.swift',
                    OUT/'ProductionMethods.swift', OUT/'main.swift', '-o', OUT/'internal-tests'])
 test_code = run('run', [OUT/'internal-tests']) if compile_code == 0 else None

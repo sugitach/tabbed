@@ -25,6 +25,8 @@ final class AXAppObserverBridge {
                     notification as CFString,
                     Unmanaged.passUnretained(self).toOpaque()
                 )
+                WindowDiagnostics.record(.init(event: .observerRegistered, pid: pid,
+                    status: error.rawValue, notification: WindowDiagnostics.notification(notification)))
                 if error == .success || error == .notificationAlreadyRegistered {
                     observation.notifications.insert(notification)
                 }
@@ -34,7 +36,9 @@ final class AXAppObserverBridge {
         }
 
         var observer: AXObserver?
-        guard AXObserverCreate(pid, Self.callback, &observer) == .success,
+        let created = AXObserverCreate(pid, Self.callback, &observer)
+        WindowDiagnostics.record(.init(event: .observerCreated, pid: pid, status: created.rawValue))
+        guard created == .success,
               let observer else {
             return
         }
@@ -51,6 +55,8 @@ final class AXAppObserverBridge {
                 notification as CFString,
                 refcon
             )
+            WindowDiagnostics.record(.init(event: .observerRegistered, pid: pid,
+                status: error.rawValue, notification: WindowDiagnostics.notification(notification)))
             if error == .success || error == .notificationAlreadyRegistered {
                 registered.insert(notification)
             }
@@ -101,6 +107,13 @@ final class AXAppObserverBridge {
         MainActor.assumeIsolated {
             let bridge = Unmanaged<AXAppObserverBridge>.fromOpaque(refcon).takeUnretainedValue()
             guard let pid = bridge.pid(for: observer) else { return }
+            if WindowDiagnostics.isRecording {
+                var resolved = CGWindowID(0)
+                let result = _AXUIElementGetWindow(element, &resolved)
+                WindowDiagnostics.record(.init(event: .applicationNotification, pid: pid,
+                    resolvedWindowID: resolved, status: result.rawValue,
+                    notification: WindowDiagnostics.notification(notification as String)))
+            }
             bridge.onEvent?(pid, notification as String, element)
         }
     }
