@@ -11,7 +11,9 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     DispatchQueue.main.pending = []
     NSAlert.presentations = []
     NSAlert.responses = []
+    NSApplication.shared.presentationActions = []
     NSWorkspace.shared.shownApps = []
+    NSWorkspace.shared.openedURLs = []
     AccessibilityPermission.trusted = false
     NSScreen.screens = [NSScreen(visibleFrame: CGRect(x: 0, y: 24, width: 1000, height: 700))]
     let c = TabGroupController()
@@ -456,16 +458,19 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     NSAlert.responses = [.alertFirstButtonReturn]
     app.presentPermissionHelp()
     try check(NSAlert.presentations.count == 1 && app.settingsRequests == 1 && NSWorkspace.shared.shownApps.isEmpty, "Only the Settings choice may open/request permission")
+    try check(NSWorkspace.shared.openedURLs.isEmpty,
+              "Requesting the OS prompt must not independently open Settings and bypass its response")
     let alert = NSAlert.presentations[0]
     try check(alert.buttons == ["Open Accessibility Settings…", "Show Current App in Finder", "Not Now"] && alert.information.contains(app.appBundleURL.path), "Guidance must provide the exact current bundle and explicit actions")
-    try check(c.dragMonitor.startCalls == 0, "Guidance is not a permission grant")
+    try check(c.dragMonitor.startCalls == 0 && app.accessibilityHelpPanel != nil,
+              "Opening Settings must keep guidance visible without granting permission")
 }
 
 @MainActor func guidanceCanRevealTheCurrentApp() throws {
     let (c, _) = setup([]); let app = AppDelegate(controller: c)
     NSAlert.responses = [.alertSecondButtonReturn]
     app.presentPermissionHelp()
-    try check(NSWorkspace.shared.shownApps == [app.appBundleURL] && app.settingsRequests == 0, "Finder must reveal only the current app without requesting access")
+    try check(app.accessibilityHelpPanel != nil && NSWorkspace.shared.shownApps == [app.appBundleURL] && app.settingsRequests == 0, "Finder must reveal only the current app without requesting access")
 }
 
 @MainActor func dismissingGuidanceKeepsWaitingWithoutActions() throws {
@@ -476,7 +481,7 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
         app.presentPermissionHelp()
         for tick in 0..<3 { app.refreshStartup(now: Date(timeIntervalSince1970: Double(tick))) }
         try check(NSAlert.presentations.count == 1 && app.settingsRequests == 0 && NSWorkspace.shared.shownApps.isEmpty, "Dismissal and polling must not open settings, reveal files or repeat the modal")
-        try check(app.permissionTimer?.isValid == true && c.dragMonitor.startCalls == 0, "Dismissing help must preserve safe permission polling")
+        try check(app.accessibilityHelpPanel == nil && app.permissionTimer?.isValid == true && c.dragMonitor.startCalls == 0, "Dismissing help must preserve safe permission polling")
     }
 }
 

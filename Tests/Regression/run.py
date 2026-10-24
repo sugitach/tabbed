@@ -20,7 +20,7 @@ selected = {
     'Sources/Group/TabGroupController+GroupOperations.swift': ('TabGroupController', ['remove', 'dissolve', 'untab'], []),
     'Sources/Group/TabGroupController+AXSync.swift': ('TabGroupController', ['handleWindowNotification'], []),
     'Sources/Group/TabGroupController+WindowCreation.swift': ('TabGroupController', ['handleWindowCreated', 'resolveAndAutoAddWindow', 'targetGroupForNewWindow'], []),
-    'Sources/App/AppDelegate.swift': ('AppDelegate', [], ['applicationShouldTerminate', 'applicationWillTerminate', 'refreshAccessibilityStartup', 'stopPermissionPolling', 'showAccessibilityHelp']),
+    'Sources/App/AppDelegate.swift': ('AppDelegate', ['openAXSettings'], ['applicationShouldTerminate', 'applicationWillTerminate', 'refreshAccessibilityStartup', 'stopPermissionPolling', 'showAccessibilityHelp', 'presentAccessibilityHelp', 'handleAccessibilityHelpResponse']),
 }
 
 def method(source, name, optional=False):

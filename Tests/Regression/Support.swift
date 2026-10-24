@@ -126,6 +126,11 @@ struct WindowFrame { let id: WindowID }
     static let shared = NSWorkspace()
     let notificationCenter = Center()
     var shownApps: [URL] = []
+    var openedURLs: [URL] = []
+    @discardableResult func open(_ url: URL) -> Bool {
+        openedURLs.append(url)
+        return true
+    }
     func activateFileViewerSelecting(_ urls: [URL]) { shownApps += urls }
     @MainActor final class Center {
         func removeObserver(_ object: AnyObject) { Trace.add("workspace.removeObserver") }
@@ -141,10 +146,29 @@ let kAXWindowAttribute = "window"
 
 // Only the optional normal-termination callbacks are modeled. No real app or UI.
 @MainActor final class NSApplication {
+    static let shared = NSApplication()
+    var aborts = 0
+    var presentationActions: [String] = []
+    func activate(ignoringOtherApps: Bool) {
+        presentationActions.append(ignoringOtherApps ? "activate" : "activateWithoutIgnoring")
+    }
+    func abortModal() { aborts += 1 }
     enum TerminateReply { case terminateNow, terminateCancel }
     enum ModalResponse { case alertFirstButtonReturn, alertSecondButtonReturn, alertThirdButtonReturn, abort }
 }
+@MainActor final class AlertWindow {
+    var hidden = false
+    func orderOut(_ sender: Any?) { hidden = true }
+    var onPresent: (() -> Void)?
+    func makeKeyAndOrderFront(_ sender: Any?) {
+        NSApplication.shared.presentationActions.append("key")
+        hidden = false
+        onPresent?()
+    }
+    func orderFrontRegardless() { NSApplication.shared.presentationActions.append("front") }
+}
 @MainActor final class NSAlert {
+    let window = AlertWindow()
     struct Presentation {
         let message: String
         let information: String
@@ -161,12 +185,29 @@ let kAXWindowAttribute = "window"
         return Self.responses.isEmpty ? .alertFirstButtonReturn : Self.responses.removeFirst()
     }
 }
+@MainActor final class AccessibilityHelpPanel {
+    let window = AlertWindow()
+    let messageText = "Accessibility access is not active"
+    let informativeText: String
+    let buttons = ["Open Accessibility Settings…", "Show Current App in Finder", "Not Now"]
+    let onResponse: (NSApplication.ModalResponse) -> Void
+    init(information: String, onResponse: @escaping (NSApplication.ModalResponse) -> Void) {
+        informativeText = information; self.onResponse = onResponse
+        window.onPresent = { [weak self] in
+            guard let self else { return }
+            NSAlert.presentations.append(.init(message: self.messageText,
+                information: self.informativeText, buttons: self.buttons))
+            if !NSAlert.responses.isEmpty { self.onResponse(NSAlert.responses.removeFirst()) }
+        }
+    }
+}
 @MainActor final class AppDelegate {
     let controller: TabGroupController
     var quitWithoutRestoring = false
     var monitoringStarted = false
     var nextMonitoringAttempt = Date.distantPast
     var permissionTimer: Timer?
+    var accessibilityHelpPanel: AccessibilityHelpPanel?
     var monitoringStatus = ""
     var monitoringActive = false
     var appBundleURL = URL(fileURLWithPath: "/Regression Fixture/Tabbed Dev.app")
@@ -184,7 +225,10 @@ let kAXWindowAttribute = "window"
         refreshAccessibilityStartup(now: now)
 #endif
     }
-    func openAXSettings() { settingsRequests += 1 }
+    func ensureAccessibilityPermission() -> Bool {
+        settingsRequests += 1
+        return AXIsProcessTrusted()
+    }
     func presentPermissionHelp() {
 #if HAS_PERMISSION_HELP
         showAccessibilityHelp()
