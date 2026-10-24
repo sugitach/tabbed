@@ -65,6 +65,7 @@ extension TabGroupController {
 
     func tickActiveMove() {
         guard let group = activeMoveGroup, let active = group.activeWindow,
+              active.id == activeMoveOriginWindowID,
               active.id != draggedWindow?.id, Date() <= activeMoveDeadline else {
             endTrackingActiveMove()
             return
