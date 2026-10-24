@@ -49,6 +49,7 @@ extension TabGroupController {
     }
 
     func reassertPanelZOrder(for group: TabGroup) {
+        guard !group.isPanelHiddenForMove else { return }
         guard isGroupOnActiveSpace(group) else { return }
 
         // Anchor every strip to its own window, including background groups.

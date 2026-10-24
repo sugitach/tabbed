@@ -28,6 +28,7 @@ extension TabGroupController {
     }
 
     func positionPanel(for group: TabGroup) {
+        guard !group.isPanelHiddenForMove else { return }
         let compact = group.useCompact
         if group.viewModel.compact != compact {
             group.viewModel.compact = compact
@@ -72,7 +73,7 @@ extension TabGroupController {
             groupFrame: WindowDiagnostics.frame(group.contentFrame), applyingLayout: false))
 
         positionPanel(for: group)
-        group.panel.show()
+        if !group.isPanelHiddenForMove { group.panel.show() }
         reassertPanelZOrder(for: group)
         group.syncViewModel()
         // A native drag/AX raise may finish after this initial ordering. New
@@ -151,6 +152,7 @@ extension TabGroupController {
     }
 
     func dissolve(_ group: TabGroup) {
+        if activeMoveGroup === group { endTrackingActiveMove(restorePanel: false) }
         WindowDiagnostics.record(.init(event: .groupDissolved, groupID: group.id,
             activeWindowID: group.activeWindow?.id, memberIDs: group.windows.map(\.id)))
         group.panel.hide()

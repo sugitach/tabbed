@@ -129,7 +129,10 @@ final class TabBarPanel: NSPanel {
         }
     }
 
-    func hide() {
+    func hide(animated: Bool = true) {
+        let previousAnimation = animationBehavior
+        if !animated { animationBehavior = .none }
+        defer { animationBehavior = previousAnimation }
         cancelCollapseWatch()
         orderOut(nil)
     }

@@ -71,11 +71,11 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
         return true
     }
 
-    /// Re-read `~/.config/tabbed.toml` and apply any keyboard-shortcut changes.
     func recordInputMonitoringDiagnostics() {
         dragMonitor.recordMonitoringDiagnostics()
     }
 
+    /// Re-read `~/.config/tabbed.toml` and apply any keyboard-shortcut changes.
     func reloadConfig() {
         config = TabbedConfig.load()
         keyboardMonitor.apply(settings: config.shortcuts)
@@ -86,6 +86,12 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     func dragDidBegin(window: ManagedWindow?, at point: CGPoint) {
         guard let window else { return }
         draggedWindow = window
+        if let group = group(containing: window.id), group.activeWindow?.id == window.id {
+            beginTrackingActiveMove(for: group)
+            if let frame = engine.windowServerFrame(of: window.id) {
+                adoptTrackedFrame(frame, for: group)
+            }
+        }
         if let frame = engine.frame(of: window) {
             draggedSize = frame.size
             dragGrabOffset = CGSize(width: point.x - frame.minX, height: point.y - frame.minY)
@@ -169,6 +175,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
         // Transfer the group atomically. remove()/dissolve() would restore or
         // re-layout its remaining windows midway through the transfer.
         if let source {
+            if activeMoveGroup === source { endTrackingActiveMove(restorePanel: false) }
             source.panel.hide()
             groups.removeAll { $0 === source }
             source.windows = []

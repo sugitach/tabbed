@@ -15,6 +15,7 @@ final class TabGroup {
 
     var spaceID: UInt64?
     var moveAnchorFrame: CGRect?
+    var isPanelHiddenForMove = false
 
     init(windows: [ManagedWindow], activeIndex: Int, contentFrame: CGRect, spaceID: UInt64?) {
         self.windows = windows
