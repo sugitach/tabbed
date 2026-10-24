@@ -81,6 +81,7 @@ extension TabGroupController {
     func selectTab(_ id: WindowID, in group: TabGroup) {
         guard let idx = group.windows.firstIndex(where: { $0.id == id }) else { return }
         group.activeIndex = idx
+        group.panel.collapseAfterSelection()
         applyLayout(for: group)
         if isGroupOnActiveSpace(group) {
             engine.activate(group.windows[idx])
