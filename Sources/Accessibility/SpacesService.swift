@@ -15,7 +15,22 @@ final class SpacesService {
         return spaces.compactMap(spaceID(from:)).first
     }
 
-    func activeSpaceID() -> UInt64? {
+    func activeSpaceIDs() -> Set<UInt64>? {
+        let connection = _CGSDefaultConnection()
+        if let displays = copyArray(CGSCopyManagedDisplaySpaces(connection)) {
+            let current = Set(displays.compactMap { display -> UInt64? in
+                guard let dict = display as? [String: Any],
+                      let value = dict["Current Space"],
+                      let id = spaceID(from: value), id != 0 else { return nil }
+                return id
+            })
+            if !current.isEmpty { return current }
+        }
+        // Preserve the existing fallback when the display snapshot is absent.
+        return activeSpaceID().map { [$0] }
+    }
+
+    private func activeSpaceID() -> UInt64? {
         let connection = _CGSDefaultConnection()
 
         if let displayID = mainDisplayIdentifier() {

@@ -11,7 +11,9 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     DispatchQueue.main.pending = []
     NSAlert.presentations = []
     NSAlert.responses = []
+    NSApplication.shared.presentationActions = []
     NSWorkspace.shared.shownApps = []
+    NSWorkspace.shared.openedURLs = []
     AccessibilityPermission.trusted = false
     NSScreen.screens = [NSScreen(visibleFrame: CGRect(x: 0, y: 24, width: 1000, height: 700))]
     let c = TabGroupController()
@@ -37,7 +39,7 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     try check(c.observer.unobserved.isEmpty, "Unknown liveness must keep observation")
     try check(requestNormalQuit(c) == .terminateNow, "Recovered AX query must allow restore")
     try check(c.engine.attempts == [1, 2, 3], "Quit must attempt every original window")
-    try check(c.engine.frames[2] == destination, "Parked window must receive the group destination")
+    try check(c.engine.frames[2] == destination.offsetBy(dx: 32, dy: -32), "Parked window must receive the group destination")
 }
 @MainActor func permissionAndOtherErrorsMustKeepTargets() throws {
     for error: SimulatedAXError in [.apiDisabled, .failure, .notImplemented] {
@@ -196,7 +198,7 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     let frame = CGRect(x: -800, y: 100, width: 400, height: 300)
     c.groups[0].contentFrame = frame
     try check(requestNormalQuit(c) == .terminateNow, "Existing left display should permit Quit")
-    try check([1, 2, 3].allSatisfy { c.engine.frames[UInt32($0)] == frame }, "Existing negative-coordinate display must be preserved")
+    try check([1, 2, 3].allSatisfy { c.engine.frames[UInt32($0)] == frame.offsetBy(dx: CGFloat($0 - 1) * 32, dy: -CGFloat($0 - 1) * 32) }, "Existing negative-coordinate display must be preserved")
 }
 
 @MainActor func windowCreationDoesNotAdoptUnrelatedFocusedWindow() throws {
@@ -355,6 +357,49 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     try check(c.engine.attempts == [1, 2] && c.groups.count == 1, "Dismissal must not discard restoration targets")
 }
 
+@MainActor func restorationWaitsForPublishedFrame() throws {
+    let target = CGRect(x: 100, y: 200, width: 800, height: 600)
+    var reads = 0, waits = 0
+    let result = WindowRestoration.verify(frame: target, read: {
+        reads += 1
+        return reads < 4 ? CGRect(x: -1000, y: 200, width: 800, height: 600) : target
+    }, wait: { waits += 1 })
+    try check(result && waits == 3, "Delayed publication must settle without repeated writes")
+    waits = 0
+    try check(!WindowRestoration.verify(frame: target, read: { nil }, wait: { waits += 1 }) && waits == 10,
+              "Unknown geometry must remain a bounded failure")
+    try check(!WindowRestoration.verify(frame: target, read: { CGRect(x: 100, y: 200, width: 900, height: 600) }, wait: {}),
+              "A real size mismatch cannot be hidden")
+}
+
+@MainActor func grantedPermissionClosesGuidance() throws {
+    let (c, _) = setup([2]); let app = AppDelegate(controller: c)
+    let alert = AccessibilityHelpPanel(information: "Fixture guidance", onResponse: { _ in }); app.accessibilityHelpPanel = alert
+    AccessibilityPermission.trusted = true
+    c.dragMonitor.startResult = false
+    let now = Date()
+    app.refreshStartup(now: now)
+    try check(app.accessibilityHelpPanel != nil && !alert.window.hidden && !app.monitoringActive,
+              "Guidance must stay visible until monitoring and icon become active")
+    c.dragMonitor.startResult = true
+    app.refreshStartup(now: now.addingTimeInterval(6))
+    try check(app.accessibilityHelpPanel == nil && alert.window.hidden && app.monitoringActive,
+              "Active monitoring must dismiss our guidance")
+}
+
+@MainActor func normalQuitCascadesGroupWindows() throws {
+    let (c, windows) = setup([3, 2])
+    let bases = c.groups.map(\.contentFrame)
+    try check(requestNormalQuit(c) == .terminateNow, "Grouped Quit should restore successfully")
+    for (groupIndex, members) in [Array(windows[0..<3]), Array(windows[3..<5])].enumerated() {
+        for (index, window) in members.enumerated() {
+            let expected = bases[groupIndex].offsetBy(dx: CGFloat(index) * 32, dy: -CGFloat(index) * 32)
+            let clamped = WindowRestoration.destination(for: expected, screens: NSScreen.screens.map(\.visibleFrame))
+            try check(c.engine.frames[window.id] == clamped, "Quit must cascade each group in 32-point steps")
+        }
+    }
+}
+
 @MainActor func permissionGrantStartsWithoutRelaunch() throws {
     let (c, _) = setup([]); let app = AppDelegate(controller: c)
     let now = Date(timeIntervalSince1970: 100)
@@ -456,16 +501,33 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     NSAlert.responses = [.alertFirstButtonReturn]
     app.presentPermissionHelp()
     try check(NSAlert.presentations.count == 1 && app.settingsRequests == 1 && NSWorkspace.shared.shownApps.isEmpty, "Only the Settings choice may open/request permission")
+    try check(NSWorkspace.shared.openedURLs.isEmpty,
+              "Requesting the OS prompt must not independently open Settings and bypass its response")
     let alert = NSAlert.presentations[0]
     try check(alert.buttons == ["Open Accessibility Settings…", "Show Current App in Finder", "Not Now"] && alert.information.contains(app.appBundleURL.path), "Guidance must provide the exact current bundle and explicit actions")
-    try check(c.dragMonitor.startCalls == 0, "Guidance is not a permission grant")
+    try check(c.dragMonitor.startCalls == 0 && app.accessibilityHelpPanel != nil,
+              "Opening Settings must keep guidance visible without granting permission")
+}
+
+@MainActor func guidanceActivatesOnceWithoutStealingFocusDuringPolling() throws {
+    let (c, _) = setup([]); let app = AppDelegate(controller: c)
+    app.presentPermissionHelp()
+    try check(NSApplication.shared.presentationActions == ["activate", "key", "front"],
+              "Initial guidance must activate the accessory app before fronting its panel")
+    let panel = app.accessibilityHelpPanel
+    for tick in 0..<4 { app.refreshStartup(now: Date(timeIntervalSince1970: Double(tick))) }
+    try check(NSApplication.shared.presentationActions.count == 3,
+              "Permission polling must not repeatedly steal focus from Settings")
+    app.presentPermissionHelp()
+    try check(app.accessibilityHelpPanel === panel && NSApplication.shared.presentationActions == ["activate", "key", "front", "activate", "key", "front"],
+              "An explicit Help request must bring the existing panel to the front")
 }
 
 @MainActor func guidanceCanRevealTheCurrentApp() throws {
     let (c, _) = setup([]); let app = AppDelegate(controller: c)
     NSAlert.responses = [.alertSecondButtonReturn]
     app.presentPermissionHelp()
-    try check(NSWorkspace.shared.shownApps == [app.appBundleURL] && app.settingsRequests == 0, "Finder must reveal only the current app without requesting access")
+    try check(app.accessibilityHelpPanel != nil && NSWorkspace.shared.shownApps == [app.appBundleURL] && app.settingsRequests == 0, "Finder must reveal only the current app without requesting access")
 }
 
 @MainActor func dismissingGuidanceKeepsWaitingWithoutActions() throws {
@@ -476,7 +538,7 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
         app.presentPermissionHelp()
         for tick in 0..<3 { app.refreshStartup(now: Date(timeIntervalSince1970: Double(tick))) }
         try check(NSAlert.presentations.count == 1 && app.settingsRequests == 0 && NSWorkspace.shared.shownApps.isEmpty, "Dismissal and polling must not open settings, reveal files or repeat the modal")
-        try check(app.permissionTimer?.isValid == true && c.dragMonitor.startCalls == 0, "Dismissing help must preserve safe permission polling")
+        try check(app.accessibilityHelpPanel == nil && app.permissionTimer?.isValid == true && c.dragMonitor.startCalls == 0, "Dismissing help must preserve safe permission polling")
     }
 }
 
@@ -613,6 +675,9 @@ MainActor.assumeIsolated {
         ("cancelled bypass retains recovery targets", cancelledBypassKeepsRecoveryTargets),
         ("aborted confirmation cannot approve bypass", abortedConfirmationCannotApproveBypass),
         ("dismissed warning cannot approve bypass", dismissedWarningCannotApproveBypass),
+        ("restoration waits for geometry publication", restorationWaitsForPublishedFrame),
+        ("normal Quit cascades each group", normalQuitCascadesGroupWindows),
+        ("granted permission closes guidance", grantedPermissionClosesGuidance),
         ("permission grant starts without relaunch", permissionGrantStartsWithoutRelaunch),
         ("tap failure stays inactive and recovers", tapFailureDoesNotClaimReadyAndCanRecover),
         ("denied permission keeps waiting", deniedPermissionKeepsWaiting),
@@ -623,6 +688,7 @@ MainActor.assumeIsolated {
         ("ad-hoc guidance does not claim proven stale registration", adHocGuidanceDoesNotClaimAnOldEntryIsProven),
         ("unknown signature does not invent a cause", unknownSignatureDoesNotInventASigningCause),
         ("permission guidance explicitly opens Settings", guidanceOpensSettingsOnlyOnExplicitChoice),
+        ("permission guidance activates without repeated focus stealing", guidanceActivatesOnceWithoutStealingFocusDuringPolling),
         ("permission guidance reveals current app", guidanceCanRevealTheCurrentApp),
         ("guidance dismissal keeps waiting without repetition", dismissingGuidanceKeepsWaitingWithoutActions),
         ("granted/stopped apps skip stale permission guidance", grantedOrStoppedAppDoesNotShowStalePermissionGuidance),

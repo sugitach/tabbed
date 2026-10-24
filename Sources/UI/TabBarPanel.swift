@@ -5,6 +5,9 @@ import SwiftUI
 final class TabBarPanel: NSPanel {
     let model: TabGroupViewModel
 
+    var onFrameChanged: (() -> Void)?
+    var onMouseUp: (() -> Void)?
+    private var waitForPointerExit = false
     private var isCompact = false
     private var restingFrame: CGRect = .zero
     private var expandedFrame: CGRect = .zero
@@ -57,6 +60,12 @@ final class TabBarPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
+    override func sendEvent(_ event: NSEvent) {
+        // Deliver tab clicks normally before notifying the gesture observer.
+        super.sendEvent(event)
+        if event.type == .leftMouseUp { onMouseUp?() }
+    }
+
     func place(at frame: CGRect) {
         setFrame(frame, display: true)
     }
@@ -66,17 +75,24 @@ final class TabBarPanel: NSPanel {
         isCompact = compact
         restingFrame = resting
         expandedFrame = expanded
-        if !compact { cancelCollapseWatch() }
+        if !compact {
+            cancelCollapseWatch()
+            waitForPointerExit = false
+            model.hovered = false
+        }
         let target = (compact && model.hovered) ? expanded : resting
         setFrame(target, display: true)
+        onFrameChanged?()
     }
 
     private func handleHover(_ hovering: Bool) {
         guard isCompact else { return }
         if hovering {
+            guard !waitForPointerExit else { return }
             cancelCollapseWatch()
             setExpanded(true)
         } else {
+            waitForPointerExit = false
             beginCollapseWatch()
         }
     }
@@ -84,12 +100,18 @@ final class TabBarPanel: NSPanel {
     private func setExpanded(_ expanded: Bool) {
         model.hovered = expanded
         let target = expanded ? expandedFrame : restingFrame
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.18
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            ctx.allowsImplicitAnimation = true
-            animator().setFrame(target, display: true)
-        }
+        // A delayed animation must not overwrite a newer selection/layout.
+        setFrame(target, display: true)
+        onFrameChanged?()
+    }
+
+    func collapseAfterSelection() {
+        guard isCompact else { return }
+        cancelCollapseWatch()
+        waitForPointerExit = true
+        setExpanded(false)
+        // Frame changes can suppress mouseExited; poll the resting frame too.
+        beginCollapseWatch()
     }
 
     private func beginCollapseWatch() {
@@ -100,6 +122,13 @@ final class TabBarPanel: NSPanel {
     }
 
     private func tickCollapseWatch() {
+        if waitForPointerExit {
+            if !restingFrame.contains(NSEvent.mouseLocation) {
+                waitForPointerExit = false
+                cancelCollapseWatch()
+            }
+            return
+        }
         let safe = expandedFrame.insetBy(dx: -collapseSafeZoneX, dy: -collapseSafeZoneY)
         if !safe.contains(NSEvent.mouseLocation) {
             cancelCollapseWatch()
@@ -119,7 +148,10 @@ final class TabBarPanel: NSPanel {
         }
     }
 
-    func hide() {
+    func hide(animated: Bool = true) {
+        let previousAnimation = animationBehavior
+        if !animated { animationBehavior = .none }
+        defer { animationBehavior = previousAnimation }
         cancelCollapseWatch()
         orderOut(nil)
     }

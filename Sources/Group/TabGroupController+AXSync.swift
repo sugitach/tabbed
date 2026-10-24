@@ -30,11 +30,10 @@ extension TabGroupController {
 
         case kAXMovedNotification, kAXResizedNotification:
             guard group.activeWindow?.id == id,
-                  id != draggedWindow?.id,
                   isGroupOnActiveSpace(group) else {
                 WindowDiagnostics.record(.init(event: .notificationIgnored, windowID: id,
                     groupID: group.id, activeWindowID: group.activeWindow?.id,
-                    reason: group.activeWindow?.id != id ? .inactive : (id == draggedWindow?.id ? .dragging : .wrongSpace)))
+                    reason: group.activeWindow?.id != id ? .inactive : .wrongSpace))
                 return
             }
             guard let frame = engine.frame(of: group.windows[group.activeIndex]) else {
@@ -46,9 +45,8 @@ extension TabGroupController {
                 groupID: group.id, activeWindowID: group.activeWindow?.id,
                 groupFrame: WindowDiagnostics.frame(group.contentFrame),
                 axFrame: WindowDiagnostics.frame(frame), source: .accessibility))
-            group.contentFrame = frame
-            positionPanel(for: group)
             beginTrackingActiveMove(for: group)
+            adoptTrackedFrame(frame, for: group)
 
         default:
             break
@@ -57,21 +55,41 @@ extension TabGroupController {
 
     func beginTrackingActiveMove(for group: TabGroup) {
         guard !isStopping else { return }
+        if activeMoveGroup !== group || activeMoveOriginWindowID != group.activeWindow?.id {
+            endTrackingActiveMove()
+        }
         activeMoveGroup = group
         activeMoveOriginWindowID = group.activeWindow?.id
         WindowDiagnostics.record(.init(event: .trackingBegin, groupID: group.id,
             activeWindowID: group.activeWindow?.id, trackingWindowID: activeMoveOriginWindowID))
-        activeMoveDeadline = Date().addingTimeInterval(0.2)
         guard activeMoveTimer == nil else { return }
-        activeMoveTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
+        activeMoveDeadline = Date().addingTimeInterval(0.1)
+        let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tickActiveMove() }
         }
+        activeMoveTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    func adoptTrackedFrame(_ frame: CGRect, for group: TabGroup) {
+        if frame != group.contentFrame {
+            // Reset only on real geometry changes: duplicate AX notifications
+            // must not prevent the panel from returning after motion stops.
+            activeMoveDeadline = Date().addingTimeInterval(0.1)
+            if frame.origin != group.contentFrame.origin, !group.isPanelHiddenForMove {
+                group.isPanelHiddenForMove = true
+                group.panel.hide(animated: false)
+            }
+        }
+        group.contentFrame = frame
+        if !group.isPanelHiddenForMove { positionPanel(for: group) }
     }
 
     func tickActiveMove() {
         guard !isStopping else { return }
         guard let group = activeMoveGroup, let active = group.activeWindow,
-              active.id != draggedWindow?.id, Date() <= activeMoveDeadline else {
+              groups.contains(where: { $0 === group }),
+              active.id == activeMoveOriginWindowID else {
             endTrackingActiveMove()
             return
         }
@@ -86,16 +104,29 @@ extension TabGroupController {
             groupFrame: WindowDiagnostics.frame(group.contentFrame),
             axFrame: WindowDiagnostics.frame(axFrame), cgFrame: WindowDiagnostics.frame(cgFrame),
             source: cgFrame == nil ? .accessibility : .windowServer))
-        group.contentFrame = frame
-        positionPanel(for: group)
+        // Sample before testing the deadline, so a delayed tick cannot briefly
+        // show the panel while the window has continued moving.
+        adoptTrackedFrame(frame, for: group)
+        if Date() >= activeMoveDeadline { endTrackingActiveMove() }
     }
 
-    func endTrackingActiveMove() {
+    func endTrackingActiveMove(restorePanel: Bool = true) {
         WindowDiagnostics.record(.init(event: .trackingEnd, groupID: activeMoveGroup?.id,
             activeWindowID: activeMoveGroup?.activeWindow?.id, trackingWindowID: activeMoveOriginWindowID))
         activeMoveTimer?.invalidate()
         activeMoveTimer = nil
+        let group = activeMoveGroup
         activeMoveGroup = nil
         activeMoveOriginWindowID = nil
+        guard let group else { return }
+        let wasHidden = group.isPanelHiddenForMove
+        group.isPanelHiddenForMove = false
+        guard restorePanel, wasHidden, !isStopping,
+              groups.contains(where: { $0 === group }),
+              isGroupOnActiveSpace(group) else { return }
+        positionPanel(for: group)
+        group.panel.show()
+        reassertPanelZOrder(for: group)
+        syncPanelZOrderWithFrontmostGroupSoon()
     }
 }

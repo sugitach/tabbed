@@ -27,6 +27,7 @@ final class AXWindowEngine: WindowEngine {
         }
     }
 
+
     func managedWindow(from element: AXUIElement, pid: pid_t) -> ManagedWindow? {
         guard pid != ownPID, isStandardWindow(element) else { return nil }
 
@@ -102,6 +103,13 @@ final class AXWindowEngine: WindowEngine {
         WindowDiagnostics.record(.init(event: .frameRequest, windowID: window.id, pid: window.pid,
             requestedFrame: WindowDiagnostics.frame(frame)))
         let cgFrame = CoordinateConverter.cgFrame(fromAppKit: frame)
+        // A parked window can still belong to a different display. Move it to
+        // the destination before resizing, so the old display's constraints
+        // do not clamp the requested size. Reapply position after resizing,
+        // since the application may adjust the origin to keep the window visible.
+        if copyCGSizeAttribute(kAXSizeAttribute, from: window.element) != cgFrame.size {
+            _ = setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
+        }
         let sizeStatus = setCGSizeAttribute(kAXSizeAttribute, value: cgFrame.size, on: window.element)
         let positionStatus = setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
         WindowDiagnostics.record(.init(event: .frameResult, windowID: window.id, pid: window.pid,
@@ -129,12 +137,20 @@ final class AXWindowEngine: WindowEngine {
     func restoreFrame(_ frame: CGRect, of window: ManagedWindow) -> Bool {
         AXUIElementSetMessagingTimeout(window.element, 1.0)
         let cgFrame = CoordinateConverter.cgFrame(fromAppKit: frame)
-        let resized = setCGSizeAttribute(kAXSizeAttribute, value: cgFrame.size, on: window.element) == .success
-        // Attempt position even when resizing fails, to recover as much as possible.
-        let moved = setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element) == .success
-        guard resized, moved, let actual = self.frame(of: window) else { return false }
-        return abs(actual.minX - frame.minX) <= 2 && abs(actual.minY - frame.minY) <= 2
-            && abs(actual.width - frame.width) <= 2 && abs(actual.height - frame.height) <= 2
+        // Recover a parked window onto its destination display before resize.
+        if copyCGSizeAttribute(kAXSizeAttribute, from: window.element) != cgFrame.size {
+            _ = setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
+        }
+        let sizeStatus = setCGSizeAttribute(kAXSizeAttribute, value: cgFrame.size, on: window.element)
+        let positionStatus = setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
+        WindowDiagnostics.record(.init(event: .frameResult, windowID: window.id, pid: window.pid,
+            requestedFrame: WindowDiagnostics.frame(frame), sizeStatus: sizeStatus.rawValue,
+            positionStatus: positionStatus.rawValue))
+        // A rejected no-op setter is not a failure if the frame is correct.
+        // WindowServer geometry also avoids stale AX caches after a successful move.
+        return WindowRestoration.verify(frame: frame,
+            read: { self.windowServerFrame(of: window.id) ?? self.frame(of: window) },
+            wait: { Thread.sleep(forTimeInterval: 0.02) })
     }
 
     func raise(_ window: ManagedWindow) {
@@ -191,7 +207,7 @@ final class AXWindowEngine: WindowEngine {
         return spaces.spaceID(forWindow: window.id)
     }
 
-    func activeSpaceID() -> UInt64? { spaces.activeSpaceID() }
+    func activeSpaceIDs() -> Set<UInt64>? { spaces.activeSpaceIDs() }
 
     func move(_ window: ManagedWindow, toSpaceOf reference: ManagedWindow) {
         spaces.move(window: window.id, toSpaceOf: reference.id)

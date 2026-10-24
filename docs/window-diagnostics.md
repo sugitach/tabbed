@@ -18,6 +18,7 @@ The same check with two normal Chrome windows, and then with two windows from an
 - Window IDs, PIDs, group IDs and membership, selected window, and the window that originally started move tracking.
 - Requested geometry, group geometry before adoption, existing AX/WindowServer frame reads, and the WindowServer ID actually returned.
 - Size/position write results, observer creation and registration results, notification categories, ignored-notification reasons, and closure checks.
+- Passive input observer installation, initial mouse-event delivery, bounded startup reinstall count, and whether a mouse-down found a candidate window. Enabling recording captures this state without restarting monitoring. Events before recording started are not retained.
 - At activation boundaries only, extra read-only samples of identity, geometry, `AXMinimized`, and application-level `AXEnhancedUserInterface`.
 
 There are no fields for window titles, URLs, page content, raw AX strings, or credentials. Unknown notification names become `other`. Geometry uses AppKit coordinates as `[x, y, width, height]`; omitted boolean or frame fields mean unavailable, not false or zero. `sizeStatus` and `positionStatus` preserve AX error numbers. A local AXValue encoding failure is separately marked `valueEncodingFailed` and normalized to AXError.failure.

@@ -8,18 +8,28 @@ protocol DragMonitorDelegate: AnyObject {
     func dragDidMove(to point: CGPoint)
     func dragDidEnd(at point: CGPoint)
     func dragDidCancel()
+    func dragGroupingDidCancel()
+    func dragDidEndWithoutGrouping(at point: CGPoint)
 }
 
-/// Global Command-drag event tap.
+/// Observes asynchronous copies of other apps' mouse/modifier events.
+/// The handler cannot change, suppress, or repost the original input.
 @MainActor
 final class DragMonitor {
     weak var delegate: DragMonitorDelegate?
+    var onMouseInteraction: (() -> Void)?
     private let engine: WindowEngine
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
-    private var isTakingOverDrag = false
-    private var isMouseDown = false
-    private var pendingGesture = false
+    private var eventMonitor: Any?
+    private var observerGeneration: UInt64 = 0
+    private var startupDeliveryTimer: Timer?
+    private var startupChecks = 0
+    private var startupReinstallCount = 0
+    private var hasReceivedMouseEvent = false
+    private var candidateWindow: ManagedWindow?
+    private var initialFrame: CGRect?
+    private var isObservingDrag = false
+    private var commandIsHeld = false
+    private var hasDragged = false
     private var downPoint: CGPoint = .zero
     private static let dragThreshold: CGFloat = 6
 
@@ -29,150 +39,172 @@ final class DragMonitor {
 
     @discardableResult
     func start() -> Bool {
-        guard eventTap == nil else { return true }
-
-        let mask = Self.mask(for: [
-            .leftMouseDown,
-            .leftMouseDragged,
-            .leftMouseUp,
-            .flagsChanged
-        ])
-
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: mask,
-            callback: Self.eventTapCallback,
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else {
-            NSLog("[DragMonitor] failed to create CGEventTap")
-            return false
+        guard eventMonitor == nil else { return true }
+        startupChecks = 0
+        startupReinstallCount = 0
+        hasReceivedMouseEvent = false
+        guard installObserver() else { return false }
+        // A non-nil monitor token does not prove delivery after a fresh grant.
+        // Retry twice while idle, without requiring a menu or diagnostic action.
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkInitialEventDelivery() }
         }
-
-        guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
-            CFMachPortInvalidate(tap)
-            return false
-        }
-
-        eventTap = tap
-        runLoopSource = source
-        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        guard CGEvent.tapIsEnabled(tap: tap) else {
-            stop()
-            return false
-        }
+        startupDeliveryTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        RunLoop.main.add(timer, forMode: .modalPanel)
+        recordMonitoringDiagnostics()
         return true
+    }
+
+    private func installObserver() -> Bool {
+        let generation = observerGeneration &+ 1
+        let mask: NSEvent.EventTypeMask = [
+            .leftMouseDown, .leftMouseDragged, .leftMouseUp, .flagsChanged
+        ]
+        guard let monitor = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] event in
+            MainActor.assumeIsolated {
+                guard let self, self.observerGeneration == generation, self.eventMonitor != nil else { return }
+                if event.type != .flagsChanged {
+                    self.hasReceivedMouseEvent = true
+                    self.startupDeliveryTimer?.invalidate()
+                    self.startupDeliveryTimer = nil
+                }
+                let point = event.cgEvent.map { CoordinateConverter.appKitPoint(fromCG: $0.location) }
+                    ?? NSEvent.mouseLocation
+                self.handle(type: event.type, point: point,
+                    commandIsDown: event.modifierFlags.contains(.command),
+                    leftButtonIsDown: NSEvent.pressedMouseButtons & 1 != 0)
+            }
+        }) else {
+            NSLog("[DragMonitor] failed to install global event observer")
+            return false
+        }
+        let previous = eventMonitor
+        observerGeneration = generation
+        eventMonitor = monitor
+        if let previous { NSEvent.removeMonitor(previous) }
+        return true
+    }
+
+    private func checkInitialEventDelivery() {
+        guard startupDeliveryTimer != nil, !hasReceivedMouseEvent else { return }
+        // Never replace an observer in the middle of a physical mouse gesture.
+        guard NSEvent.pressedMouseButtons == 0 else { return }
+        startupChecks += 1
+        guard startupChecks >= 2 else { return }
+        startupChecks = 0
+        startupReinstallCount += 1
+        _ = installObserver()
+        if startupReinstallCount >= 2 {
+            startupDeliveryTimer?.invalidate()
+            startupDeliveryTimer = nil
+        }
+        recordMonitoringDiagnostics()
+    }
+
+    func recordMonitoringDiagnostics() {
+        WindowDiagnostics.record(.init(event: .inputMonitoringState,
+            observerInstalled: eventMonitor != nil, receivedMouseEvent: hasReceivedMouseEvent,
+            startupReinstallCount: startupReinstallCount,
+            gestureCandidateFound: candidateWindow != nil))
     }
 
     func stop() {
-        if let eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-            CFMachPortInvalidate(eventTap)
+        startupDeliveryTimer?.invalidate()
+        startupDeliveryTimer = nil
+        observerGeneration &+= 1
+        if let eventMonitor {
+            NSEvent.removeMonitor(eventMonitor)
         }
-        if let runLoopSource {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
-        }
-        eventTap = nil
-        runLoopSource = nil
-        isTakingOverDrag = false
-        isMouseDown = false
-        pendingGesture = false
+        eventMonitor = nil
+        resetGesture()
     }
 
-    private func handle(type: CGEventType, event: CGEvent) -> CGEvent? {
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            if isTakingOverDrag {
-                isTakingOverDrag = false
-                isMouseDown = false
-                delegate?.dragDidCancel()
-            }
-            if let eventTap {
-                CGEvent.tapEnable(tap: eventTap, enable: true)
-            }
-            return event
-        }
+    /// Own panels receive normal AppKit input, outside the global observer.
+    /// A mouse release there ends any pending gesture without creating a group.
+    func ownPanelMouseUp() {
+        if isObservingDrag { delegate?.dragDidCancel() }
+        resetGesture()
+        onMouseInteraction?()
+    }
 
-        let point = appKitPoint(fromCGEvent: event)
-        let commandIsDown = event.flags.contains(.maskCommand)
+    private func resetGesture() {
+        candidateWindow = nil
+        initialFrame = nil
+        isObservingDrag = false
+        commandIsHeld = false
+        hasDragged = false
+    }
 
+    // Observe native movement only. Every physical event remains with the app;
+    // neither a guessed title-bar rectangle nor synthetic input is needed.
+    private func handle(type: NSEvent.EventType, point: CGPoint,
+                        commandIsDown: Bool, leftButtonIsDown: Bool) {
         switch type {
         case .leftMouseDown:
-            isMouseDown = true
+            onMouseInteraction?()
+            if isObservingDrag { delegate?.dragDidCancel() }
+            resetGesture()
             downPoint = point
-            pendingGesture = commandIsDown
-            return event
-
+            commandIsHeld = commandIsDown
+            // Capture native movement even if Command arrives after mouse-down.
+            // This remains observation only; the app owns every input event.
+            if let window = engine.window(at: point, excluding: []) {
+                candidateWindow = window
+                initialFrame = engine.windowServerFrame(of: window.id)
+            }
+            recordMonitoringDiagnostics()
         case .leftMouseDragged:
-            if isTakingOverDrag {
-                delegate?.dragDidMove(to: point)
-                return nil
-            }
-            if pendingGesture, commandIsDown,
-               hypot(point.x - downPoint.x, point.y - downPoint.y) > Self.dragThreshold {
-                pendingGesture = false
-                if beginTakeover(at: downPoint) {
-                    delegate?.dragDidMove(to: point)
-                    return nil
-                }
-            }
-            return event
-
+            hasDragged = true
+            updateCommandState(commandIsDown)
+            observeMovement(at: point)
         case .leftMouseUp:
-            isMouseDown = false
-            pendingGesture = false
-            if isTakingOverDrag {
-                isTakingOverDrag = false
-                delegate?.dragDidEnd(at: point)
-                return nil
-            }
-            return event
-
+            onMouseInteraction?()
+            updateCommandState(commandIsDown)
+            observeMovement(at: point)
+            if isObservingDrag { delegate?.dragDidEnd(at: point) }
+            resetGesture()
         case .flagsChanged:
-            if isTakingOverDrag, !commandIsDown {
-                isTakingOverDrag = false
-                delegate?.dragDidCancel()
-            } else if !isTakingOverDrag, commandIsDown, isMouseDown {
-                if beginTakeover(at: point) {
-                    pendingGesture = false
-                    delegate?.dragDidMove(to: point)
-                }
-            } else if pendingGesture, !commandIsDown {
-                pendingGesture = false
+            // Modifier events can carry stale/non-pointer coordinates. They
+            // never establish a drag or select a window under the pointer.
+            guard leftButtonIsDown else {
+                if isObservingDrag { delegate?.dragDidCancel() }
+                resetGesture()
+                return
             }
-            return event
-
+            updateCommandState(commandIsDown)
         default:
-            return isTakingOverDrag ? nil : event
+            break
         }
     }
 
-    private func beginTakeover(at point: CGPoint) -> Bool {
-        let window = engine.window(at: point, excluding: [])
-        delegate?.dragDidBegin(window: window, at: point)
-        guard window != nil else { return false }
-        isTakingOverDrag = true
-        return true
-    }
-
-    private func appKitPoint(fromCGEvent event: CGEvent) -> CGPoint {
-        CoordinateConverter.appKitPoint(fromCG: event.location)
-    }
-
-    private static func mask(for types: [CGEventType]) -> CGEventMask {
-        types.reduce(CGEventMask(0)) { mask, type in
-            mask | (CGEventMask(1) << type.rawValue)
+    private func updateCommandState(_ held: Bool) {
+        commandIsHeld = held
+        if !held, isObservingDrag {
+            delegate?.dragDidCancel()
+            isObservingDrag = false
         }
     }
 
-    private static let eventTapCallback: CGEventTapCallBack = { _, type, event, userInfo in
-        guard let userInfo else { return Unmanaged.passUnretained(event) }
-
-        return MainActor.assumeIsolated {
-            let monitor = Unmanaged<DragMonitor>.fromOpaque(userInfo).takeUnretainedValue()
-            guard let result = monitor.handle(type: type, event: event) else { return nil }
-            return Unmanaged.passUnretained(result)
+    private func observeMovement(at point: CGPoint) {
+        guard hasDragged, commandIsHeld,
+              let window = candidateWindow, let initialFrame,
+              hypot(point.x - downPoint.x, point.y - downPoint.y) > Self.dragThreshold,
+              let frame = engine.windowServerFrame(of: window.id) else { return }
+        // Resizing is not positive evidence of a native window move. Invalidate
+        // this candidate until the next mouse-down; pass all input through.
+        guard abs(frame.width - initialFrame.width) < 1,
+              abs(frame.height - initialFrame.height) < 1 else {
+            updateCommandState(false)
+            candidateWindow = nil
+            return
         }
+        guard hypot(frame.minX - initialFrame.minX, frame.minY - initialFrame.minY) > 3 else { return }
+        if !isObservingDrag {
+            isObservingDrag = true
+            delegate?.dragDidBegin(window: window, at: point)
+        }
+        delegate?.dragDidMove(to: point)
     }
+
 }

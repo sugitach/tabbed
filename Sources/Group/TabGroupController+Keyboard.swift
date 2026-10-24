@@ -7,7 +7,7 @@ extension TabGroupController: KeyboardShortcutMonitorDelegate {
               group.windows.indices.contains(index) else {
             return false
         }
-        // Already active — still consume so the keystroke doesn't reach the app.
+        // Already active: the registered system hotkey needs no further action.
         if index != group.activeIndex {
             selectTab(group.windows[index].id, in: group)
         }
