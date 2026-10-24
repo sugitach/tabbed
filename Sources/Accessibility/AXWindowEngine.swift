@@ -107,6 +107,13 @@ final class AXWindowEngine: WindowEngine {
         WindowDiagnostics.record(.init(event: .frameRequest, windowID: window.id, pid: window.pid,
             requestedFrame: WindowDiagnostics.frame(frame)))
         let cgFrame = CoordinateConverter.cgFrame(fromAppKit: frame)
+        // A parked window can still belong to a different display. Move it to
+        // the destination before resizing, so the old display's constraints
+        // do not clamp the requested size. Reapply position after resizing,
+        // since the application may adjust the origin to keep the window visible.
+        if copyCGSizeAttribute(kAXSizeAttribute, from: window.element) != cgFrame.size {
+            _ = setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
+        }
         let sizeStatus = setCGSizeAttribute(kAXSizeAttribute, value: cgFrame.size, on: window.element)
         let positionStatus = setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
         WindowDiagnostics.record(.init(event: .frameResult, windowID: window.id, pid: window.pid,

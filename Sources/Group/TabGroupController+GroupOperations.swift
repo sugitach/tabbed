@@ -75,11 +75,12 @@ extension TabGroupController {
     /// Park inactive tabs out of view without triggering AX clamping.
     private func parkOffscreen(_ window: ManagedWindow) {
         guard let frame = engine.frame(of: window) else { return }
-        let screen = NSScreen.screens.first { $0.frame.intersects(frame) }
-            ?? NSScreen.main ?? NSScreen.screens.first
-        guard let visible = screen?.visibleFrame else { return }
-        let parked = CGRect(x: visible.maxX - 1,
-                            y: visible.minY + 1 - frame.height,
+        // Use the outer edge of the entire desktop, not a shared display edge.
+        guard let desktop = NSScreen.screens.map(\.frame).reduce(nil as CGRect?, { result, next in
+            result.map { $0.union(next) } ?? next
+        }) else { return }
+        let parked = CGRect(x: desktop.maxX - 1,
+                            y: desktop.minY + 1 - frame.height,
                             width: frame.width, height: frame.height)
         WindowDiagnostics.record(.init(event: .parking, windowID: window.id, pid: window.pid,
             requestedFrame: WindowDiagnostics.frame(parked), axFrame: WindowDiagnostics.frame(frame)))
@@ -92,10 +93,16 @@ extension TabGroupController {
             groupID: group.id, activeWindowID: group.activeWindow?.id,
             trackingWindowID: activeMoveOriginWindowID,
             groupFrame: WindowDiagnostics.frame(group.contentFrame)))
+        endTrackingActiveMove()
+        let changesWindow = group.activeIndex != idx
         group.activeIndex = idx
-        applyLayout(for: group)
+        if changesWindow {
+            applyLayout(for: group)
+        }
         if isGroupOnActiveSpace(group) {
             engine.activate(group.windows[idx])
+            reassertPanelZOrder(for: group)
+            syncPanelZOrderWithFrontmostGroupSoon()
         }
     }
 
