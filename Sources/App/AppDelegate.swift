@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var autoAddMenuItem: NSMenuItem?
     private var compactModeMenuItem: NSMenuItem?
+    private var diagnosticMenuItem: NSMenuItem?
     private let engine = AXWindowEngine()
     private lazy var controller = TabGroupController(engine: engine)
 
@@ -26,6 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controller.start()
         NSLog("[Tabbed] controller started — global ⌘-drag monitor active")
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        WindowDiagnostics.recorder.stop()
     }
 
     // MARK: - Status bar
@@ -64,6 +69,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Open Accessibility Settings…",
                      action: #selector(openAXSettings), keyEquivalent: "").target = self
         menu.addItem(.separator())
+        diagnosticMenuItem = menu.addItem(withTitle: "Record Window Diagnostics",
+            action: #selector(toggleWindowDiagnostics), keyEquivalent: "")
+        diagnosticMenuItem?.target = self
+        diagnosticMenuItem?.toolTip = "Records window IDs, geometry and AX results locally. No titles, URLs or page content. Off by default; two log files, up to 8 MiB each."
+        WindowDiagnostics.recorder.onStateChange = { [weak self] in
+            self?.diagnosticMenuItem?.state = WindowDiagnostics.isRecording ? .on : .off
+            self?.diagnosticMenuItem?.title = WindowDiagnostics.recorder.failure == nil
+                ? "Record Window Diagnostics" : "Record Window Diagnostics (Stopped: Log Error)"
+        }
+        menu.addItem(withTitle: "Show Window Diagnostic Logs…",
+                     action: #selector(showWindowDiagnosticLogs), keyEquivalent: "").target = self
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Tabbed",
                      action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = menu
@@ -88,6 +105,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func editConfig() {
         NSWorkspace.shared.open(TabbedConfig.ensureFileExists())
+    }
+
+    @objc private func toggleWindowDiagnostics() {
+        if WindowDiagnostics.isRecording {
+            WindowDiagnostics.recorder.stop()
+        } else {
+            do { try WindowDiagnostics.recorder.start() }
+            catch {
+                let alert = NSAlert()
+                alert.messageText = "Window diagnostics could not start"
+                alert.informativeText = "The local diagnostic log could not be opened safely. No permissions or window settings were changed."
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+        }
+    }
+
+    @objc private func showWindowDiagnosticLogs() {
+        let directory = WindowDiagnostics.recorder.directory
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        NSWorkspace.shared.open(directory)
     }
 
     @objc private func openAXSettings() {

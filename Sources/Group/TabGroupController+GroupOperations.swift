@@ -48,6 +48,9 @@ extension TabGroupController {
         }
 
         isApplyingLayout = true
+        WindowDiagnostics.record(.init(event: .layoutBegin, groupID: group.id,
+            activeWindowID: group.activeWindow?.id, memberIDs: group.windows.map(\.id),
+            groupFrame: WindowDiagnostics.frame(group.contentFrame), applyingLayout: true))
         for (index, window) in group.windows.enumerated() {
             _ = engine.refreshTitle(window)
             if index == group.activeIndex {
@@ -60,6 +63,9 @@ extension TabGroupController {
             engine.raise(active)
         }
         isApplyingLayout = false
+        WindowDiagnostics.record(.init(event: .layoutEnd, groupID: group.id,
+            activeWindowID: group.activeWindow?.id,
+            groupFrame: WindowDiagnostics.frame(group.contentFrame), applyingLayout: false))
 
         positionPanel(for: group)
         group.panel.show()
@@ -75,11 +81,17 @@ extension TabGroupController {
         let parked = CGRect(x: visible.maxX - 1,
                             y: visible.minY + 1 - frame.height,
                             width: frame.width, height: frame.height)
+        WindowDiagnostics.record(.init(event: .parking, windowID: window.id, pid: window.pid,
+            requestedFrame: WindowDiagnostics.frame(parked), axFrame: WindowDiagnostics.frame(frame)))
         engine.setFrame(parked, of: window)
     }
 
     func selectTab(_ id: WindowID, in group: TabGroup) {
         guard let idx = group.windows.firstIndex(where: { $0.id == id }) else { return }
+        WindowDiagnostics.record(.init(event: .selection, windowID: id, pid: group.windows[idx].pid,
+            groupID: group.id, activeWindowID: group.activeWindow?.id,
+            trackingWindowID: activeMoveOriginWindowID,
+            groupFrame: WindowDiagnostics.frame(group.contentFrame)))
         group.activeIndex = idx
         applyLayout(for: group)
         if isGroupOnActiveSpace(group) {
@@ -100,6 +112,8 @@ extension TabGroupController {
 
     func remove(_ id: WindowID, from group: TabGroup, keepWindowObserved: Bool) {
         guard let idx = group.windows.firstIndex(where: { $0.id == id }) else { return }
+        WindowDiagnostics.record(.init(event: .memberRemoved, windowID: id, groupID: group.id,
+            activeWindowID: group.activeWindow?.id, memberIDs: group.windows.map(\.id)))
         group.windows.remove(at: idx)
         if !keepWindowObserved {
             observer.unobserve(id)
@@ -121,6 +135,8 @@ extension TabGroupController {
     }
 
     func dissolve(_ group: TabGroup) {
+        WindowDiagnostics.record(.init(event: .groupDissolved, groupID: group.id,
+            activeWindowID: group.activeWindow?.id, memberIDs: group.windows.map(\.id)))
         group.panel.hide()
         for window in group.windows {
             observer.unobserve(window.id)

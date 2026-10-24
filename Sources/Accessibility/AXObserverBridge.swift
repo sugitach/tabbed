@@ -9,6 +9,7 @@ final class AXObserverBridge {
         let observer: AXObserver
         let source: CFRunLoopSource
         let element: AXUIElement
+        let pid: pid_t
     }
 
     private var observations: [WindowID: Observation] = [:]
@@ -17,19 +18,24 @@ final class AXObserverBridge {
         guard observations[window.id] == nil else { return }
 
         var observer: AXObserver?
-        guard AXObserverCreate(window.pid, Self.callback, &observer) == .success,
+        let created = AXObserverCreate(window.pid, Self.callback, &observer)
+        WindowDiagnostics.record(.init(event: .observerCreated, windowID: window.id,
+            pid: window.pid, status: created.rawValue))
+        guard created == .success,
               let observer else {
             return
         }
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         for notification in Self.notifications {
-            AXObserverAddNotification(observer, window.element, notification as CFString, refcon)
+            let status = AXObserverAddNotification(observer, window.element, notification as CFString, refcon)
+            WindowDiagnostics.record(.init(event: .observerRegistered, windowID: window.id,
+                pid: window.pid, status: status.rawValue, notification: WindowDiagnostics.notification(notification)))
         }
 
         let source = AXObserverGetRunLoopSource(observer)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
-        observations[window.id] = Observation(observer: observer, source: source, element: window.element)
+        observations[window.id] = Observation(observer: observer, source: source, element: window.element, pid: window.pid)
     }
 
     /// Match by element identity because destroyed windows may not resolve by id.
@@ -52,12 +58,20 @@ final class AXObserverBridge {
         kAXWindowMiniaturizedNotification
     ]
 
-    private static let callback: AXObserverCallback = { _, element, notification, refcon in
+    private static let callback: AXObserverCallback = { observer, element, notification, refcon in
         guard let refcon else { return }
 
         MainActor.assumeIsolated {
             let bridge = Unmanaged<AXObserverBridge>.fromOpaque(refcon).takeUnretainedValue()
-            guard let windowID = bridge.windowID(for: element) else { return }
+            guard let windowID = bridge.windowID(for: element) else {
+                if WindowDiagnostics.isRecording {
+                    let expected = bridge.observations.first { CFEqual($0.value.observer, observer) }
+                    WindowDiagnostics.record(.init(event: .notificationIgnored, windowID: expected?.key,
+                        pid: expected?.value.pid, notification: WindowDiagnostics.notification(notification as String),
+                        reason: .unmatchedElement))
+                }
+                return
+            }
             bridge.onEvent?(windowID, notification as String)
         }
     }

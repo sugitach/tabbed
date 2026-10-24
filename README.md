@@ -1,3 +1,7 @@
+## Window-switch diagnostics (in progress, 2026-10-23)
+
+An opt-in local trace is being prepared for unexpected resizing, visible inactive windows, stale closed-window tabs, and bottom-right movement. It records IDs, geometry, AX results, and notification ordering without titles, URLs, or page content. This is diagnostic instrumentation, not a verified fix; live Chrome/Incognito testing remains pending. See [recording steps and limitations](docs/window-diagnostics.md).
+
 ### windows are better 
 # tabbed
 
