@@ -108,8 +108,11 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
             if let target = self.engine.window(at: point, excluding: [dragged.id]) {
                 self.formGroup(dragged: dragged, target: target)
             } else if let sourceGroup = self.group(containing: dragged.id) {
-                self.remove(dragged.id, from: sourceGroup, keepWindowObserved: false)
-                self.engine.activate(dragged)
+                // A drop outside a target keeps the source group intact.
+                if let frame = self.engine.windowServerFrame(of: dragged.id) {
+                    sourceGroup.contentFrame = frame
+                    self.positionPanel(for: sourceGroup)
+                }
             }
         }
     }
@@ -134,32 +137,40 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
             return
         }
 
+        let source = group(containing: dragged.id)
+        let existing = group(containing: target.id)
+        // Dropping onto another member of the same group changes nothing.
+        if let source, source === existing { return }
+        let incoming = source?.windows ?? [dragged]
         let targetSpace = engine.spaceID(of: target)
-        if let draggedSpace = engine.spaceID(of: dragged),
-           let targetSpace,
-           draggedSpace != targetSpace {
-            engine.move(dragged, toSpaceOf: target)
+        for window in incoming {
+            if let windowSpace = engine.spaceID(of: window),
+               let targetSpace, windowSpace != targetSpace {
+                engine.move(window, toSpaceOf: target)
+            }
         }
 
-        if let sourceGroup = group(containing: dragged.id), !sourceGroup.contains(target.id) {
-            remove(dragged.id, from: sourceGroup, keepWindowObserved: true)
+        // Transfer the group atomically. remove()/dissolve() would restore or
+        // re-layout its remaining windows midway through the transfer.
+        if let source {
+            source.panel.hide()
+            groups.removeAll { $0 === source }
+            source.windows = []
         }
-
-        engine.setFrame(targetFrame, of: dragged)
 
         let destination: TabGroup
-        if let existing = group(containing: target.id) {
+        if let existing {
             destination = existing
             destination.contentFrame = targetFrame
             destination.spaceID = targetSpace
-            if !destination.contains(dragged.id) {
-                destination.windows.append(dragged)
+            for window in incoming where !destination.contains(window.id) {
+                destination.windows.append(window)
             }
             destination.activeIndex = destination.windows.firstIndex { $0.id == dragged.id } ?? destination.activeIndex
         } else {
             destination = TabGroup(
-                windows: [target, dragged],
-                activeIndex: 1,
+                windows: [target] + incoming,
+                activeIndex: 1 + (incoming.firstIndex { $0.id == dragged.id } ?? 0),
                 contentFrame: targetFrame,
                 spaceID: targetSpace
             )
