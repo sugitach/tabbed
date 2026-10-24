@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var autoAddMenuItem: NSMenuItem?
     private var compactModeMenuItem: NSMenuItem?
+    private var shortcutStatusItem: NSMenuItem?
     private let engine = AXWindowEngine()
     private lazy var controller = TabGroupController(engine: engine)
 
@@ -16,6 +17,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         TabbedConfig.ensureFileExists()
         setUpStatusItem()
+        controller.keyboardMonitor.onRegistrationIssuesChanged = { [weak self] issues in
+            self?.shortcutStatusItem?.isHidden = issues.isEmpty
+            self?.shortcutStatusItem?.title = "Keyboard shortcuts unavailable: \(issues.count) issue(s)"
+            self?.shortcutStatusItem?.toolTip = issues.joined(separator: "\n")
+        }
 
         let trusted = ensureAccessibilityPermission()
         NSLog("[Tabbed] accessibility trusted = \(trusted)")
@@ -35,6 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image = NSImage(systemSymbolName: "rectangle.on.rectangle.angled",
                                      accessibilityDescription: "Tabbed")
         let menu = NSMenu()
+        shortcutStatusItem = menu.addItem(withTitle: "", action: nil, keyEquivalent: "")
+        shortcutStatusItem?.isHidden = true
         menu.addItem(withTitle: "Tabbed", action: nil, keyEquivalent: "")
         menu.addItem(.separator())
         let autoAddItem = menu.addItem(
