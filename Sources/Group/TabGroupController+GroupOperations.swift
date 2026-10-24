@@ -96,10 +96,9 @@ extension TabGroupController {
         guard let window = group.windows.first(where: { $0.id == id }) else { return }
         let base = group.contentFrame
         remove(id, from: group, keepWindowObserved: false)
-        let offset: CGFloat = 32
         let size = engine.frame(of: window)?.size ?? base.size
-        engine.setFrame(CGRect(x: base.minX + offset, y: base.minY - offset,
-                               width: size.width, height: size.height), of: window)
+        let destination = WindowRestoration.ungroupedFrame(base, index: 1)
+        engine.setFrame(CGRect(origin: destination.origin, size: size), of: window)
         engine.activate(window)
     }
 

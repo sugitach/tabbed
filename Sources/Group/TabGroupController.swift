@@ -94,7 +94,9 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
         let snapshot = groups
         for group in snapshot { group.panel.hide() }
         let entries = snapshot.flatMap { group in
-            group.windows.map { ($0, group.contentFrame) }
+            group.windows.enumerated().map { index, window in
+                (window, WindowRestoration.ungroupedFrame(group.contentFrame, index: index))
+            }
         }
         let failures = WindowRestoration.restore(
             entries, screens: NSScreen.screens.map(\.visibleFrame),
