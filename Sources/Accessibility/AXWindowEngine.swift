@@ -114,12 +114,17 @@ final class AXWindowEngine: WindowEngine {
     func restoreFrame(_ frame: CGRect, of window: ManagedWindow) -> Bool {
         AXUIElementSetMessagingTimeout(window.element, 1.0)
         let cgFrame = CoordinateConverter.cgFrame(fromAppKit: frame)
-        let resized = setCGSizeAttribute(kAXSizeAttribute, value: cgFrame.size, on: window.element)
-        // Attempt position even when resizing fails, to recover as much as possible.
-        let moved = setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
-        guard resized, moved, let actual = self.frame(of: window) else { return false }
-        return abs(actual.minX - frame.minX) <= 2 && abs(actual.minY - frame.minY) <= 2
-            && abs(actual.width - frame.width) <= 2 && abs(actual.height - frame.height) <= 2
+        // Recover a parked window onto its destination display before resize.
+        if copyCGSizeAttribute(kAXSizeAttribute, from: window.element) != cgFrame.size {
+            _ = setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
+        }
+        _ = setCGSizeAttribute(kAXSizeAttribute, value: cgFrame.size, on: window.element)
+        _ = setCGPointAttribute(kAXPositionAttribute, value: cgFrame.origin, on: window.element)
+        // A rejected no-op setter is not a failure if the frame is correct.
+        // WindowServer geometry also avoids stale AX caches after a successful move.
+        return WindowRestoration.verify(frame: frame,
+            read: { self.windowServerFrame(of: window.id) ?? self.frame(of: window) },
+            wait: { Thread.sleep(forTimeInterval: 0.02) })
     }
 
     func raise(_ window: ManagedWindow) {
