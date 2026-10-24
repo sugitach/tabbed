@@ -8,6 +8,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     private lazy var dragMonitor: DragMonitor = {
         let m = DragMonitor(engine: engine)
         m.delegate = self
+        m.onMouseInteraction = { [weak self] in self?.mouseInteractionDidOccur() }
         return m
     }()
 
@@ -56,17 +57,23 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
         }
     }
 
-    func start() {
-        dragMonitor.start()
+    @discardableResult
+    func start() -> Bool {
+        guard dragMonitor.start() else { return false }
         keyboardMonitor.start()
         observeSpaceChanges()
         observeApplicationChanges()
         if autoAddNewWindowsToStack {
             observeRunningAppsForWindowCreation()
         }
+        return true
     }
 
     /// Re-read `~/.config/tabbed.toml` and apply any keyboard-shortcut changes.
+    func recordInputMonitoringDiagnostics() {
+        dragMonitor.recordMonitoringDiagnostics()
+    }
+
     func reloadConfig() {
         config = TabbedConfig.load()
         keyboardMonitor.apply(settings: config.shortcuts)
@@ -85,16 +92,10 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
             dragGrabOffset = .zero
         }
         dragTargets = engine.onScreenWindowFrames(excluding: [window.id])
-        engine.raise(window)
     }
 
     func dragDidMove(to point: CGPoint) {
-        guard let dragged = draggedWindow else { return }
-        if let size = draggedSize {
-            let origin = CGPoint(x: point.x - dragGrabOffset.width,
-                                 y: point.y - dragGrabOffset.height)
-            engine.setFrame(CGRect(origin: origin, size: size), of: dragged)
-        }
+        guard draggedWindow != nil else { return }
         if let hit = dragTargets.first(where: { $0.frame.contains(point) }) {
             dropIndicator.present(over: hit.frame)
         } else {
@@ -117,6 +118,17 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     }
 
     func dragDidCancel() {
+        resetDragState()
+    }
+
+    func dragGroupingDidCancel() {
+        // Continue moving the dragged window, but never offer a drop target
+        // again during this gesture, even if Command is pressed again.
+        dragTargets = []
+        dropIndicator.dismiss()
+    }
+
+    func dragDidEndWithoutGrouping(at point: CGPoint) {
         resetDragState()
     }
 
@@ -176,6 +188,9 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     }
 
     private func wire(_ group: TabGroup) {
+        group.panel.onMouseUp = { [weak self] in
+            self?.dragMonitor.ownPanelMouseUp()
+        }
         group.viewModel.onSelect = { [weak self, weak group] id in
             guard let self, let group else { return }
             self.selectTab(id, in: group)

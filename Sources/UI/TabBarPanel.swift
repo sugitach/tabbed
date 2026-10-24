@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Borderless non-activating panel for one group's tab strip.
 final class TabBarPanel: NSPanel {
+    var onMouseUp: (() -> Void)?
     let model: TabGroupViewModel
 
     private var isCompact = false
@@ -56,6 +57,12 @@ final class TabBarPanel: NSPanel {
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+
+    override func sendEvent(_ event: NSEvent) {
+        // Deliver tab clicks normally before notifying the gesture observer.
+        super.sendEvent(event)
+        if event.type == .leftMouseUp { onMouseUp?() }
+    }
 
     func place(at frame: CGRect) {
         setFrame(frame, display: true)

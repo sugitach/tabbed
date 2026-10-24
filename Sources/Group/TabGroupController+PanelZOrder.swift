@@ -1,6 +1,13 @@
 import AppKit
 
 extension TabGroupController {
+    func mouseInteractionDidOccur() {
+        guard !groups.isEmpty else { return }
+        // Clicking inside an already focused app need not produce an AX focus
+        // or workspace activation notification, but can raise its window.
+        syncPanelZOrderWithFrontmostGroupSoon()
+    }
+
     func frontmostGroup() -> TabGroup? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
         let pid = app.processIdentifier
