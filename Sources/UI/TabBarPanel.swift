@@ -3,6 +3,7 @@ import SwiftUI
 
 /// Borderless non-activating panel for one group's tab strip.
 final class TabBarPanel: NSPanel {
+    var onFrameChanged: (() -> Void)?
     var onMouseUp: (() -> Void)?
     let model: TabGroupViewModel
 
@@ -76,6 +77,7 @@ final class TabBarPanel: NSPanel {
         if !compact { cancelCollapseWatch() }
         let target = (compact && model.hovered) ? expanded : resting
         setFrame(target, display: true)
+        onFrameChanged?()
     }
 
     private func handleHover(_ hovering: Bool) {
@@ -97,6 +99,7 @@ final class TabBarPanel: NSPanel {
             ctx.allowsImplicitAnimation = true
             animator().setFrame(target, display: true)
         }
+        onFrameChanged?()
     }
 
     private func beginCollapseWatch() {

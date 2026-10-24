@@ -168,7 +168,7 @@ final class AXWindowEngine: WindowEngine {
         return spaces.spaceID(forWindow: window.id)
     }
 
-    func activeSpaceID() -> UInt64? { spaces.activeSpaceID() }
+    func activeSpaceIDs() -> Set<UInt64>? { spaces.activeSpaceIDs() }
 
     func move(_ window: ManagedWindow, toSpaceOf reference: ManagedWindow) {
         spaces.move(window: window.id, toSpaceOf: reference.id)

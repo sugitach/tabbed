@@ -36,6 +36,8 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     var isApplyingLayout = false
     weak var mostRecentGroup: TabGroup?
 
+    var panelZOrderSyncGeneration = 0
+
     var activeMoveTimer: Timer?
     weak var activeMoveGroup: TabGroup?
     // Diagnostic origin only; does not change which window the existing tracker reads.

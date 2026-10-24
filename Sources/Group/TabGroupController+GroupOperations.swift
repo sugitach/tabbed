@@ -32,6 +32,10 @@ extension TabGroupController {
         if group.viewModel.compact != compact {
             group.viewModel.compact = compact
         }
+        group.panel.onFrameChanged = { [weak self, weak group] in
+            guard let self, let group else { return }
+            self.reassertPanelZOrder(for: group)
+        }
         group.panel.applyLayout(
             compact: compact,
             resting: group.stripFrame,
@@ -69,7 +73,12 @@ extension TabGroupController {
 
         positionPanel(for: group)
         group.panel.show()
+        reassertPanelZOrder(for: group)
         group.syncViewModel()
+        // A native drag/AX raise may finish after this initial ordering. New
+        // and recreated groups need the same settled checks as tab selection,
+        // even when no subsequent focus notification or mouse event arrives.
+        syncPanelZOrderWithFrontmostGroupSoon()
     }
 
     /// Park inactive tabs out of view without triggering AX clamping.

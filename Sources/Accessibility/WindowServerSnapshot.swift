@@ -14,6 +14,14 @@ struct WindowServerWindow {
 }
 
 enum WindowServerSnapshot {
+    /// Front-to-back IDs only; no titles or other application content.
+    static func visibleWindowIDs() -> [WindowID] {
+        guard let infos = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], 0
+        ) as? [[String: Any]] else { return [] }
+        return infos.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value }
+    }
+
     static func onScreenWindows(
         excludingOwnPID ownPID: pid_t,
         excluding excludedIDs: Set<WindowID> = []

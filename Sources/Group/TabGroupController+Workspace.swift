@@ -76,10 +76,13 @@ extension TabGroupController {
     }
 
     func isGroupOnActiveSpace(_ group: TabGroup) -> Bool {
-        guard let groupSpace = group.spaceID,
-              let activeSpace = engine.activeSpaceID() else {
+        // A restored/dragged window may migrate between display Spaces after
+        // the group captured its target. Use the active window's live identity.
+        let groupSpace = group.activeWindow.flatMap { engine.spaceID(of: $0) } ?? group.spaceID
+        guard let groupSpace,
+              let activeSpaces = engine.activeSpaceIDs() else {
             return true
         }
-        return groupSpace == activeSpace
+        return activeSpaces.contains(groupSpace)
     }
 }

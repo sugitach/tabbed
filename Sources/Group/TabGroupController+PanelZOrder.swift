@@ -22,8 +22,16 @@ extension TabGroupController {
     }
 
     func syncPanelZOrderWithFrontmostGroupSoon() {
-        DispatchQueue.main.async { [weak self] in
-            self?.syncPanelZOrderWithFrontmostGroup()
+        // Activation and AppKit ordering finish asynchronously. Coalesce focus
+        // notifications, then recheck after the destination app has settled.
+        panelZOrderSyncGeneration &+= 1
+        let generation = panelZOrderSyncGeneration
+        for delay in [0.0, 0.05, 0.15, 0.35, 0.75] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self,
+                      self.panelZOrderSyncGeneration == generation else { return }
+                self.syncPanelZOrderWithFrontmostGroup()
+            }
         }
     }
 
@@ -43,15 +51,29 @@ extension TabGroupController {
     func reassertPanelZOrder(for group: TabGroup) {
         guard isGroupOnActiveSpace(group) else { return }
 
-        let frontmostWindowID = engine.frontmostWindowID()
-        if let active = group.activeWindow,
-           frontmostGroup() === group || frontmostWindowID == active.id {
+        // Anchor every strip to its own window, including background groups.
+        // Ordering below an unrelated frontmost window can bury a compact strip
+        // behind its own content window.
+        if let active = group.activeWindow {
+            let ids = WindowServerSnapshot.visibleWindowIDs()
+            let panelID = WindowID(exactly: group.panel.windowNumber)
+            let panelIndex = panelID.flatMap { ids.firstIndex(of: $0) }
+            let anchorIndex = ids.firstIndex(of: active.id)
+            WindowDiagnostics.record(.init(event: .panelOrderSnapshot, groupID: group.id,
+                activeWindowID: active.id, panelWindowID: panelID,
+                panelFrame: WindowDiagnostics.frame(group.panel.frame),
+                panelVisible: group.panel.isVisible, panelOrderIndex: panelIndex,
+                anchorOrderIndex: anchorIndex))
+            // A non-activating panel can remain behind the newly raised app.
+            // The fallback is limited to the frontmost content window, so a
+            // background group's panel cannot jump over an unrelated app.
+            if let panelIndex, let anchorIndex, panelIndex > anchorIndex,
+               engine.frontmostWindowID() == active.id {
+                group.panel.orderFrontRegardless()
+                WindowDiagnostics.record(.init(event: .panelOrderRepair, groupID: group.id,
+                    activeWindowID: active.id, panelWindowID: panelID))
+            }
             group.panel.order(.above, relativeTo: Int(active.id))
-            return
-        }
-
-        if let frontmostWindowID {
-            group.panel.order(.below, relativeTo: Int(frontmostWindowID))
         } else {
             group.panel.orderOut(nil)
         }
