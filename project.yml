@@ -38,6 +38,8 @@ targets:
     platform: macOS
     sources:
       - path: Tests
+        excludes:
+          - WindowLifecycle
     dependencies:
       - target: Tabbed
     settings:

@@ -7,6 +7,8 @@ Pass a source root to test the same patch integrated with later feature branches
 from pathlib import Path
 import hashlib
 import json
+import os
+import platform
 import re
 import subprocess
 import sys
@@ -49,10 +51,11 @@ flags = []
 diagnostics = ROOT/'Sources/App/WindowDiagnostics.swift'
 if diagnostics.exists():
     flags = ['-D', 'HAS_WINDOW_DIAGNOSTICS', str(diagnostics)]
-sdk = '/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk'
+sdk = os.environ.get('SDKROOT') or subprocess.check_output(
+    ['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
 compile_cmd = ['xcrun', 'swiftc', '-swift-version', '5', '-sdk', sdk,
                '-module-cache-path', str(OUT/'module-cache'),
-               '-target', 'arm64-apple-macosx14.0'] + flags + [str(OUT/name) for name in
+               '-target', platform.machine() + '-apple-macosx14.0'] + flags + [str(OUT/name) for name in
                ['Support.swift', 'ProductionMethods.swift', 'main.swift']] + ['-o', str(OUT/'tests')]
 result = subprocess.run(compile_cmd, capture_output=True, text=True)
 (OUT/'compile.log').write_text(result.stdout + result.stderr)
