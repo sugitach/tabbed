@@ -9,6 +9,9 @@ exit/hide/mode change, direct-selection continuity, selection collapse, pointer
 exit rearming, stale tracking, and legacy immediate expansion. Production source
 hashes and compiler/test output are recorded in a temporary folder.
 
+This suite replaces the older `Tests/Compact` fixture. Keep standalone `main.swift`
+entry points outside `Tests`, which is discovered by the Xcode unit-test target.
+
 These checks do not launch Tabbed or synthesize input. Actual SwiftUI hit testing,
 animation, tracking delivery, and macOS panel ordering require manual validation:
 

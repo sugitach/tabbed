@@ -59,6 +59,8 @@ import CoreGraphics
         p.applyLayout(compact: false, resting: full, expanded: full)
         Timer.advance(4)
         check(!p.model.hovered && p.frame == full && p.expansionTimer == nil, "normal mode cancels pending expansion")
+        p.collapseAfterSelection()
+        check(!p.model.hovered && p.frame == full, "normal-mode selection never collapses the panel")
     }
     do {
         let p = fixture()
