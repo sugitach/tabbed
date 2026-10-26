@@ -80,6 +80,8 @@ struct TabStripView: View {
             }
         }
         .frame(width: Theme.compactIconSize, height: Theme.compactIconSize)
+        .contentShape(Rectangle())
+        .onTapGesture { model.select(tab.id) }
         .opacity(isActive ? 1.0 : 0.45)
     }
 

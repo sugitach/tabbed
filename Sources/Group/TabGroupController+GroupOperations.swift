@@ -35,7 +35,8 @@ extension TabGroupController {
         group.panel.applyLayout(
             compact: compact,
             resting: group.stripFrame,
-            expanded: compact ? group.compactExpandedFrame : group.stripFrameAbove
+            expanded: compact ? group.compactExpandedFrame : group.stripFrameAbove,
+            hoverExpansionDelay: alwaysUseCompactMode ? 3 : 0
         )
         reassertPanelZOrder(for: group)
     }
