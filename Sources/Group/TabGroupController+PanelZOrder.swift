@@ -22,6 +22,7 @@ extension TabGroupController {
 
     func syncPanelZOrderWithFrontmostGroup() {
         guard !isStopping else { return }
+        selectExternallyFocusedWindow()
         let frontmost = frontmostGroup()
 
         if let frontmost, isGroupOnActiveSpace(frontmost) {
