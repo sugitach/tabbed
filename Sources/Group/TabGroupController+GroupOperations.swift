@@ -123,6 +123,7 @@ extension TabGroupController {
     }
 
     func untab(_ id: WindowID, from group: TabGroup) {
+        sessionInteractionGeneration &+= 1
         guard !isStopping else { return }
         guard let window = group.windows.first(where: { $0.id == id }) else { return }
         let base = group.contentFrame

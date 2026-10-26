@@ -46,6 +46,9 @@ protocol WindowEngine: AnyObject {
     /// Resolve a live AX window element into the app model.
     func managedWindow(from element: AXUIElement, pid: pid_t) -> ManagedWindow?
 
+    /// Resolve this exact surviving window, without a title/focus fallback.
+    func existingWindow(id: WindowID, pid: pid_t) -> ManagedWindow?
+
     /// Current frame in AppKit screen coordinates.
     func frame(of window: ManagedWindow) -> CGRect?
 
@@ -79,4 +82,8 @@ protocol WindowEngine: AnyObject {
     /// All currently displayed Spaces, including separate Spaces per display.
     func activeSpaceIDs() -> Set<UInt64>?
     func move(_ window: ManagedWindow, toSpaceOf reference: ManagedWindow)
+}
+
+extension WindowEngine {
+    func existingWindow(id: WindowID, pid: pid_t) -> ManagedWindow? { nil }
 }

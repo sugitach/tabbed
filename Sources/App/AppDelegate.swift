@@ -84,7 +84,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        defer { WindowDiagnostics.recorder.stop() }
+        defer {
+            controller.persistSessionForTermination()
+            WindowDiagnostics.recorder.stop()
+        }
         stopPermissionPolling()
         // Respect the confirmed escape path: a fallback must not move windows
         // again after the user explicitly chose to leave them as they are.
