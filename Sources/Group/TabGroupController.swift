@@ -42,6 +42,8 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     var sessionForTermination: GroupSession?
     var didRestoreSession = false
     var sessionInteractionGeneration = 0
+    var pendingSessionGroups: [SavedWindowGroup] = []
+    var pendingSessionGeneration = 0
 
     var panelZOrderSyncGeneration = 0
 

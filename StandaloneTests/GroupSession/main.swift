@@ -79,6 +79,35 @@ import CoreGraphics
         check(cancel.groups.isEmpty, "user interaction cancels delayed restore")
     }
     do {
+        let early = fixture(); early.engine.windows[2] = nil
+        early.restoreSavedGroups(); early.isStopping = true
+        early.persistSessionForTermination()
+        check(store.load()?.groups.first?.windows == [a,b,d], "early Quit preserves unresolved startup group")
+
+        let partial = fixture()
+        let first = SavedWindowGroup(windows: [a,b], selectedID: 2, frame: frame)
+        let e = SavedWindowIdentity(id: 4, pid: 200, processLaunchTime: 23456, bundleID: "test.app")
+        let second = SavedWindowGroup(windows: [d,e], selectedID: 3, frame: frame)
+        partial.restoreSessionGroups([first, second], attemptsRemaining: 3)
+        partial.isStopping = true; partial.persistSessionForTermination()
+        check(store.load()?.groups.map { $0.windows.map(\.id) } == [[1,2],[3,4]], "partial restore Quit preserves restored and pending groups")
+
+        try store.save(session)
+        let cancel = fixture(); cancel.engine.windows[2] = nil; cancel.restoreSavedGroups()
+        cancel.sessionInteractionGeneration += 1; cancel.isStopping = true
+        cancel.persistSessionForTermination()
+        check(store.load()?.groups.isEmpty == true, "user cancellation excludes pending groups from Quit snapshot")
+
+        try store.save(session)
+        let completed = fixture(); completed.engine.windows[2] = nil; completed.restoreSavedGroups()
+        completed.engine.windows[2] = ManagedWindow(2)
+        completed.restoreSessionGroups([saved], attemptsRemaining: 0)
+        check(completed.pendingSessionGroups.isEmpty, "successful retry clears pending state")
+        completed.groups.removeAll(); completed.persistSessionForTermination()
+        check(store.load()?.groups.isEmpty == true, "completed startup state cannot resurrect an ungrouped group")
+        try store.save(session)
+    }
+    do {
         let bad = GroupSession(version: 2, groups: [saved])
         check(!bad.isValid, "unknown version rejected")
         let duplicate = GroupSession(groups: [SavedWindowGroup(windows: [a,a], selectedID: 1, frame: frame)])

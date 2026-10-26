@@ -6,7 +6,8 @@ AX and panel boundaries. It does not operate real windows or request permissions
 
 Coverage includes ordered/selected member restoration, process-instance identity,
 missing windows, changed Spaces, permission waiting, quit snapshot retention,
-empty sessions, bounded AX retries and cancellation, malformed/versioned/oversize
+empty sessions, bounded AX retries and cancellation, early Quit with pending or
+partially restored groups, malformed/versioned/oversize
 state, private permissions and destination symlinks.
 
 Manual verification:
@@ -26,6 +27,7 @@ Manual verification:
 State is stored privately in Application Support/<bundle identifier>/window-groups.json.
 It contains numeric window/process IDs, process launch times, bundle identifiers,
 member order/selection and geometry; no titles or URLs. Only surviving windows in
-unchanged owning process instances are eligible. Separate Spaces are not merged.
+unchanged owning process instances are eligible. Separate Spaces are not merged
+when macOS provides their identities.
 Startup uses an initial attempt plus up to three half-second AX retries; manual
 Command-drag/ungroup cancels pending retries. No apps or windows are reopened.

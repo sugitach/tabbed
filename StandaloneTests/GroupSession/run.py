@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise actual external-focus methods with simulated workspace/AX/selection boundaries.
+"""Exercise the production session store and controller with simulated process/AX boundaries.
 
 No real windows, input synthesis, or accessibility permission changes are used.
 Pass a source root to test the same patch integrated with later feature branches.
@@ -16,7 +16,7 @@ import tempfile
 
 HERE = Path(__file__).resolve().parent
 ROOT = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else HERE.parents[1]
-OUT = Path(tempfile.mkdtemp(prefix='tabbed-activation-'))
+OUT = Path(tempfile.mkdtemp(prefix='tabbed-session-'))
 methods = {'Sources/Group/TabGroupController+Session.swift': ('TabGroupController', ['savedIdentity', 'captureSessionForTermination', 'persistSessionForTermination', 'restoreSavedGroups', 'restoreSessionGroups'])}
 
 def extract(source, name):

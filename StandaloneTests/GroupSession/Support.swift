@@ -42,6 +42,8 @@ enum NSScreen { static let screens = [Screen()] }
     var sessionForTermination: GroupSession?
     var didRestoreSession = false, isStopping = false, isStarted = true
     var sessionInteractionGeneration = 0
+    var pendingSessionGroups: [SavedWindowGroup] = []
+    var pendingSessionGeneration = 0
     var groups: [TabGroup] = []
     var wired = 0, observed = 0, layouts = 0
     init(_ store: GroupSessionStore) { sessionStore = store }

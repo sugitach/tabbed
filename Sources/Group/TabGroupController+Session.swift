@@ -11,12 +11,23 @@ extension TabGroupController {
     /// Called before quit-time cascading/clearing, and kept across cancelled Quit retries.
     func captureSessionForTermination() {
         guard sessionForTermination == nil else { return }
-        sessionForTermination = GroupSession(groups: groups.compactMap { group in
+        var savedGroups = groups.compactMap { group -> SavedWindowGroup? in
             let windows = group.windows.compactMap { savedIdentity(for: $0) }
             guard windows.count >= 2 else { return nil }
             let selected = windows.first { $0.id == group.activeWindow?.id } ?? windows[0]
             return SavedWindowGroup(windows: windows, selectedID: selected.id, frame: group.contentFrame)
-        })
+        }
+        // AX may still be resolving some startup groups when Quit begins.
+        // Retain those groups unless explicit user interaction cancelled them.
+        if pendingSessionGeneration == sessionInteractionGeneration {
+            var usedIDs = Set(savedGroups.flatMap(\.windows).map(\.id))
+            for pending in pendingSessionGroups {
+                guard pending.windows.allSatisfy({ !usedIDs.contains($0.id) }) else { continue }
+                savedGroups.append(pending)
+                usedIDs.formUnion(pending.windows.map(\.id))
+            }
+        }
+        sessionForTermination = GroupSession(groups: savedGroups)
     }
 
     func persistSessionForTermination() {
@@ -77,6 +88,8 @@ extension TabGroupController {
             updateFocusObservers()
             applyLayout(for: restored)
         }
+        pendingSessionGroups = pending
+        pendingSessionGeneration = sessionInteractionGeneration
         if !pending.isEmpty && attemptsRemaining > 0 {
             let generation = sessionInteractionGeneration
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
