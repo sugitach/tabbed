@@ -5,6 +5,7 @@ import SwiftUI
 final class TabBarPanel: NSPanel {
     let model: TabGroupViewModel
 
+    private var waitForPointerExit = false
     private var isCompact = false
     private var restingFrame: CGRect = .zero
     private var expandedFrame: CGRect = .zero
@@ -13,6 +14,9 @@ final class TabBarPanel: NSPanel {
     private let collapseSafeZoneX: CGFloat = 28
     private let collapseSafeZoneY: CGFloat = 72
     private var collapseWatcher: Timer?
+    private var expansionTimer: Timer?
+    private var hoverExpansionDelay: TimeInterval = 0
+    private var isPointerHovering = false
 
     /// AppKit hover tracking for the non-activating panel.
     private let trackingContainer: HoverTrackingView
@@ -62,34 +66,79 @@ final class TabBarPanel: NSPanel {
     }
 
     /// Configure resting and expanded frames for the current layout.
-    func applyLayout(compact: Bool, resting: CGRect, expanded: CGRect) {
+    func applyLayout(compact: Bool, resting: CGRect, expanded: CGRect,
+                     hoverExpansionDelay: TimeInterval = 0) {
+        if isCompact != compact || self.hoverExpansionDelay != hoverExpansionDelay {
+            cancelPendingExpansion()
+            cancelCollapseWatch()
+            isPointerHovering = false
+            model.hovered = false
+            waitForPointerExit = false
+        }
+        self.hoverExpansionDelay = hoverExpansionDelay
         isCompact = compact
         restingFrame = resting
         expandedFrame = expanded
-        if !compact { cancelCollapseWatch() }
+        if !compact {
+            cancelCollapseWatch()
+            waitForPointerExit = false
+            model.hovered = false
+        }
         let target = (compact && model.hovered) ? expanded : resting
         setFrame(target, display: true)
     }
 
     private func handleHover(_ hovering: Bool) {
+        isPointerHovering = hovering
+        cancelPendingExpansion()
         guard isCompact else { return }
         if hovering {
+            guard !waitForPointerExit else { return }
             cancelCollapseWatch()
-            setExpanded(true)
+            guard !model.hovered else { return }
+            if hoverExpansionDelay > 0 {
+                let timer = Timer(timeInterval: hoverExpansionDelay, repeats: false) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.expandAfterHoverDelay() }
+                }
+                expansionTimer = timer
+                RunLoop.main.add(timer, forMode: .common)
+            } else {
+                setExpanded(true)
+            }
         } else {
+            waitForPointerExit = false
             beginCollapseWatch()
         }
+    }
+
+    private func expandAfterHoverDelay() {
+        expansionTimer = nil
+        guard isCompact, isPointerHovering, isVisible, !waitForPointerExit,
+              restingFrame.contains(NSEvent.mouseLocation) else { return }
+        setExpanded(true)
+    }
+
+    private func cancelPendingExpansion() {
+        expansionTimer?.invalidate()
+        expansionTimer = nil
     }
 
     private func setExpanded(_ expanded: Bool) {
         model.hovered = expanded
         let target = expanded ? expandedFrame : restingFrame
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.18
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            ctx.allowsImplicitAnimation = true
-            animator().setFrame(target, display: true)
-        }
+        // A delayed animation must not overwrite a newer selection/layout.
+        setFrame(target, display: true)
+    }
+
+    func collapseAfterSelection() {
+        // Direct compact-icon selection keeps its current hover deadline.
+        guard isCompact, model.hovered else { return }
+        cancelPendingExpansion()
+        cancelCollapseWatch()
+        waitForPointerExit = true
+        setExpanded(false)
+        // Frame changes can suppress mouseExited; poll the resting frame too.
+        beginCollapseWatch()
     }
 
     private func beginCollapseWatch() {
@@ -100,6 +149,13 @@ final class TabBarPanel: NSPanel {
     }
 
     private func tickCollapseWatch() {
+        if waitForPointerExit {
+            if !restingFrame.contains(NSEvent.mouseLocation) {
+                waitForPointerExit = false
+                cancelCollapseWatch()
+            }
+            return
+        }
         let safe = expandedFrame.insetBy(dx: -collapseSafeZoneX, dy: -collapseSafeZoneY)
         if !safe.contains(NSEvent.mouseLocation) {
             cancelCollapseWatch()
@@ -121,6 +177,8 @@ final class TabBarPanel: NSPanel {
 
     func hide() {
         cancelCollapseWatch()
+        cancelPendingExpansion()
+        isPointerHovering = false
         orderOut(nil)
     }
 }
