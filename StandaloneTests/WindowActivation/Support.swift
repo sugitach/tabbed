@@ -26,12 +26,17 @@ typealias WindowID = UInt32
 }
 @MainActor final class Engine {
     var focused: [Int32: WindowID] = [:]
+    var main: [Int32: WindowID] = [:]
+    func mainWindowID(for pid: Int32) -> WindowID? { main[pid] }
     func focusedOrMainWindowID(for pid: Int32) -> WindowID? { focused[pid] }
 }
 @MainActor final class TabGroupController {
     let ownPID: Int32 = 999
     let engine = Engine()
     var groups: [TabGroup] = []
+    var panelZOrderSyncGeneration = 0
+    var preferredMainWindowPID: pid_t?
+    var mainWindowPreferenceDeadline = Date.distantPast
     var isStopping = false, isApplyingLayout = false
     var draggedWindow: ManagedWindow?
     var activeMoveGroup: TabGroup?

@@ -2,11 +2,13 @@ import AppKit
 
 extension TabGroupController {
     /// Read current focus after AX notifications settle, including parked tabs.
-    func selectExternallyFocusedWindow() {
+    func selectExternallyFocusedWindow(preferMainWindowForPID: pid_t? = nil) {
         guard !isStopping, !isApplyingLayout, draggedWindow == nil,
               let app = NSWorkspace.shared.frontmostApplication,
               app.processIdentifier != ownPID,
-              let focusedID = engine.focusedOrMainWindowID(for: app.processIdentifier),
+              let focusedID = (preferMainWindowForPID == app.processIdentifier
+                  ? engine.mainWindowID(for: app.processIdentifier)
+                  : engine.focusedOrMainWindowID(for: app.processIdentifier)),
               let group = groups.first(where: { group in
                   group.windows.contains { $0.id == focusedID && $0.pid == app.processIdentifier }
               }),
@@ -14,6 +16,9 @@ extension TabGroupController {
               group.moveAnchorFrame == nil,
               isGroupOnActiveSpace(group) else { return }
 
+        // Main-window notifications can precede Chrome updating AXFocusedWindow
+        // (for example after a notification click). Re-read the live main window,
+        // never replay the event element or fall back to an arbitrary group.
         // Never adopt the parked window's geometry as the group's new frame.
         if activeMoveGroup === group { endTrackingActiveMove() }
         selectTab(focusedID, in: group)

@@ -67,6 +67,37 @@ import CoreGraphics
         c.syncPanelZOrderWithFrontmostGroup()
         check(c.selections == [2] && g.activeIndex == 1, "reentrant layout focus does not loop")
     }
+    do {
+        let (c, g) = fixture()
+        c.engine.focused[100] = 1 // Chrome's focused attribute still points at the old tab.
+        c.engine.main[100] = 2
+        c.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: 100)
+        check(g.activeWindow?.id == 2 && c.selections == [2], "notification main change overrides stale focused attribute")
+        c.engine.main[100] = 44
+        c.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: 100)
+        check(c.selections == [2], "ungrouped main window is never adopted")
+        c.engine.main[100] = nil
+        c.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: 100)
+        check(c.selections == [2], "unknown main window does not fall back to stale focus")
+        c.engine.main[100] = 1
+        NSWorkspace.shared.frontmostApplication = Application(200)
+        c.engine.focused[200] = 3
+        c.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: 100)
+        check(g.activeWindow?.id == 3, "background main hint cannot override current frontmost app")
+        NSWorkspace.shared.frontmostApplication = Application(100)
+        c.engine.main[100] = 2 // Event originally concerned 1, but main changed again.
+        c.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: 100)
+        check(g.activeWindow?.id == 2, "latest main query wins over old notification")
+    }
+    do {
+        let (c, g) = fixture()
+        c.engine.focused[100] = 1
+        c.engine.main[100] = 2
+        c.syncPanelZOrderWithFrontmostGroupSoon(preferMainWindowForPID: 100)
+        c.syncPanelZOrderWithFrontmostGroupSoon() // Subsequent focused/app event coalesces.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        check(g.activeWindow?.id == 2 && c.selections == [2], "coalesced focus events retain main intent through final retry")
+    }
     print("PASS: \(checks) external-focus checks (real production methods; simulated AX/UI boundaries)")
 }
 MainActor.assumeIsolated { run() }

@@ -39,6 +39,8 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     weak var mostRecentGroup: TabGroup?
 
     var panelZOrderSyncGeneration = 0
+    var preferredMainWindowPID: pid_t?
+    var mainWindowPreferenceDeadline = Date.distantPast
 
     var activeMoveTimer: Timer?
     weak var activeMoveGroup: TabGroup?
@@ -53,8 +55,10 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
         observer.onEvent = { [weak self] id, notification in
             self?.handleWindowNotification(id: id, notification: notification)
         }
-        appFocusObserver.onEvent = { [weak self] _, _, _ in
-            self?.syncPanelZOrderWithFrontmostGroupSoon()
+        appFocusObserver.onEvent = { [weak self] pid, notification, _ in
+            self?.syncPanelZOrderWithFrontmostGroupSoon(
+                preferMainWindowForPID: notification == kAXMainWindowChangedNotification ? pid : nil
+            )
         }
         windowCreationObserver.onEvent = { [weak self] pid, notification, element in
             guard notification == kAXWindowCreatedNotification else { return }
