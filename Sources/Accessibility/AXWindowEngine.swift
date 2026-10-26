@@ -91,6 +91,13 @@ final class AXWindowEngine: WindowEngine {
         return nil
     }
 
+    func mainWindowID(for pid: pid_t) -> WindowID? {
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 1.0)
+        guard let main = copyAXElementAttribute(kAXMainWindowAttribute, from: app) else { return nil }
+        return windowID(for: main)
+    }
+
     func frontmostWindowID() -> WindowID? {
         WindowServerSnapshot.frontmostVisibleWindow(excludingOwnPID: ownPID)?.id
     }

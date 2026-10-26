@@ -38,6 +38,24 @@ MainActor.assumeIsolated {
     group.onActiveSpace = false
     os.press(18); precondition(controller.selections==before)
     group.onActiveSpace = true
+    do {
+        // A notification changed the main window, while focused still names
+        // an active tab in a different group of the same process.
+        let c = TabGroupController()
+        let old = TabGroup([.init(id:11,pid:1),.init(id:12,pid:1)])
+        let target = TabGroup([.init(id:21,pid:1),.init(id:22,pid:1)])
+        target.activeIndex = 1; c.groups = [old,target]
+        c.engine.mainID = 22
+        c.preferredMainWindowPID = 1
+        c.mainWindowPreferenceDeadline = Date().addingTimeInterval(1)
+        precondition(c.keyboardShortcutSelectTab(at:0) && c.selections == [21])
+        precondition(old.activeIndex == 0 && target.activeIndex == 0)
+        c.engine.mainID = nil
+        precondition(!c.keyboardShortcutCycleTab(forward:true) && c.selections == [21])
+        c.mainWindowPreferenceDeadline = .distantPast
+        c.engine.focusedID = 11
+        precondition(c.keyboardShortcutCycleTab(forward:true) && c.selections == [21,12])
+    }
     // Stop and reload discard queued old IDs rather than invoking new bindings.
     let oldHandler = os.handler!, oldID = os.keys[.init(keyCode:18,modifiers:UInt32(optionKey))]!
     monitor.stop(); monitor.stop()
