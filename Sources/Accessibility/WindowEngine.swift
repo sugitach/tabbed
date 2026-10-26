@@ -76,6 +76,7 @@ protocol WindowEngine: AnyObject {
     func refreshTitle(_ window: ManagedWindow) -> String
 
     func spaceID(of window: ManagedWindow) -> UInt64?
-    func activeSpaceID() -> UInt64?
+    /// All currently displayed Spaces, including separate Spaces per display.
+    func activeSpaceIDs() -> Set<UInt64>?
     func move(_ window: ManagedWindow, toSpaceOf reference: ManagedWindow)
 }

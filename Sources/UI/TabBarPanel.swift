@@ -5,6 +5,8 @@ import SwiftUI
 final class TabBarPanel: NSPanel {
     let model: TabGroupViewModel
 
+    var onFrameChanged: (() -> Void)?
+    var onMouseUp: (() -> Void)?
     private var waitForPointerExit = false
     private var isCompact = false
     private var restingFrame: CGRect = .zero
@@ -61,6 +63,12 @@ final class TabBarPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
+    override func sendEvent(_ event: NSEvent) {
+        // Deliver tab clicks normally before notifying the gesture observer.
+        super.sendEvent(event)
+        if event.type == .leftMouseUp { onMouseUp?() }
+    }
+
     func place(at frame: CGRect) {
         setFrame(frame, display: true)
     }
@@ -86,6 +94,7 @@ final class TabBarPanel: NSPanel {
         }
         let target = (compact && model.hovered) ? expanded : resting
         setFrame(target, display: true)
+        onFrameChanged?()
     }
 
     private func handleHover(_ hovering: Bool) {
@@ -128,6 +137,7 @@ final class TabBarPanel: NSPanel {
         let target = expanded ? expandedFrame : restingFrame
         // A delayed animation must not overwrite a newer selection/layout.
         setFrame(target, display: true)
+        onFrameChanged?()
     }
 
     func collapseAfterSelection() {
@@ -175,7 +185,10 @@ final class TabBarPanel: NSPanel {
         }
     }
 
-    func hide() {
+    func hide(animated: Bool = true) {
+        let previousAnimation = animationBehavior
+        if !animated { animationBehavior = .none }
+        defer { animationBehavior = previousAnimation }
         cancelCollapseWatch()
         cancelPendingExpansion()
         isPointerHovering = false

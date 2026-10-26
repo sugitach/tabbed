@@ -5,7 +5,16 @@ TEST_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && /bin/pwd -P)
 case "${1:-internal}" in
 internal)
     [ "$#" -le 1 ] || exit 64
-    exec /usr/bin/python3 "$TEST_ROOT/Regression/run.py"
+    /usr/bin/python3 "$TEST_ROOT/KeyboardShortcuts/run.py"
+    /usr/bin/python3 "$TEST_ROOT/DragGesture/run.py"
+    /usr/bin/python3 "$TEST_ROOT/Regression/run.py"
+    for suite in WindowDiagnostics TabFrame GroupTransfer PanelVisibility MovementVisibility RestorationPolicy; do
+        /usr/bin/python3 "$TEST_ROOT/$suite/run.py"
+    done
+    /usr/bin/python3 "$TEST_ROOT/TabSwitch/run.py"
+    for suite in WindowActivation CompactHover WindowLifecycle; do
+        /usr/bin/python3 "$TEST_ROOT/../StandaloneTests/$suite/run.py"
+    done
     ;;
 guest)
     shift

@@ -14,13 +14,14 @@ OUT = HERE / 'results' / datetime.datetime.now(datetime.timezone.utc).strftime('
 OUT.mkdir(parents=True, exist_ok=False)
 SDK = Path('/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk')
 selected = {
+    'Sources/Group/TabGroupController+WindowLifecycle.swift': ('TabGroupController', ['updateWindowLifecycleMonitoring', 'stopWindowLifecycleMonitoring', 'reconcileWindowLifetimes'], []),
     'Sources/Accessibility/AXWindowEngine.swift': ('AXWindowEngine', ['isAlive', 'candidateWindowElements'], ['isKnownClosed']),
     'Sources/Group/TabGroupController.swift': ('TabGroupController', ['start'], ['restoreWindowsForTermination']),
     'Sources/Group/TabGroupController+Workspace.swift': ('TabGroupController', ['pruneDeadWindows', 'applicationDidActivate', 'activeSpaceChanged'], []),
-    'Sources/Group/TabGroupController+GroupOperations.swift': ('TabGroupController', ['remove', 'dissolve', 'untab'], []),
+    'Sources/Group/TabGroupController+GroupOperations.swift': ('TabGroupController', ['remove', 'removeWindows', 'dissolve', 'untab'], []),
     'Sources/Group/TabGroupController+AXSync.swift': ('TabGroupController', ['handleWindowNotification'], []),
     'Sources/Group/TabGroupController+WindowCreation.swift': ('TabGroupController', ['handleWindowCreated', 'resolveAndAutoAddWindow', 'targetGroupForNewWindow'], []),
-    'Sources/App/AppDelegate.swift': ('AppDelegate', [], ['applicationShouldTerminate', 'applicationWillTerminate', 'refreshAccessibilityStartup', 'stopPermissionPolling', 'showAccessibilityHelp']),
+    'Sources/App/AppDelegate.swift': ('AppDelegate', ['openAXSettings'], ['applicationShouldTerminate', 'applicationWillTerminate', 'refreshAccessibilityStartup', 'stopPermissionPolling', 'showAccessibilityHelp', 'presentAccessibilityHelp', 'handleAccessibilityHelpResponse']),
 }
 
 def method(source, name, optional=False):
@@ -88,6 +89,10 @@ production_policy = SNAPSHOT/'Sources/Group/WindowRestoration.swift'
 policy_sources = [production_policy] if production_policy.is_file() else []
 signature_source = SNAPSHOT/'Sources/App/AppCodeSignature.swift'
 if signature_source.is_file(): policy_sources.append(signature_source)
+diagnostic_source = SNAPSHOT/'Sources/App/WindowDiagnostics.swift'
+if diagnostic_source.is_file():
+    policy_sources.append(diagnostic_source)
+    flags += ['-D', 'HAS_WINDOW_DIAGNOSTICS']
 compile_code = run('compile', base + flags + policy_sources + [SNAPSHOT/'Tests/Regression/Support.swift',
                    OUT/'ProductionMethods.swift', OUT/'main.swift', '-o', OUT/'internal-tests'])
 test_code = run('run', [OUT/'internal-tests']) if compile_code == 0 else None

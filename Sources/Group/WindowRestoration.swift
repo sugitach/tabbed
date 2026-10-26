@@ -2,6 +2,24 @@ import CoreGraphics
 
 /// Pure shutdown policy, separate from AX and panels so it can be tested without permissions.
 enum WindowRestoration {
+    static func ungroupedFrame(_ frame: CGRect, index: Int) -> CGRect {
+        frame.offsetBy(dx: CGFloat(index) * 32, dy: -CGFloat(index) * 32)
+    }
+
+    /// AX setters may return before the application publishes its new frame.
+    /// Observe a bounded settling interval without repeating window writes.
+    static func verify(frame: CGRect, read: () -> CGRect?, wait: () -> Void) -> Bool {
+        for attempt in 0...10 {
+            if let actual = read(),
+               abs(actual.minX - frame.minX) <= 2, abs(actual.minY - frame.minY) <= 2,
+               abs(actual.width - frame.width) <= 2, abs(actual.height - frame.height) <= 2 {
+                return true
+            }
+            if attempt < 10 { wait() }
+        }
+        return false
+    }
+
     static func destination(for frame: CGRect, screens: [CGRect]) -> CGRect? {
         guard isFinite(frame) else { return nil }
         let usable = screens.filter { isFinite($0) && !$0.isEmpty }

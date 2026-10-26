@@ -7,7 +7,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var autoAddMenuItem: NSMenuItem?
     private var compactModeMenuItem: NSMenuItem?
     private var monitoringStatusItem: NSMenuItem?
+    private var shortcutStatusItem: NSMenuItem?
+    private var diagnosticMenuItem: NSMenuItem?
     private var permissionTimer: Timer?
+    private var accessibilityHelpPanel: AccessibilityHelpPanel?
     private var monitoringStarted = false
     private var nextMonitoringAttempt = Date.distantPast
     private lazy var codeSignature = AppCodeSignature.current()
@@ -23,6 +26,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         TabbedConfig.ensureFileExists()
         setUpStatusItem()
+        controller.keyboardMonitor.onRegistrationIssuesChanged = { [weak self] issues in
+            self?.shortcutStatusItem?.isHidden = issues.isEmpty
+            self?.shortcutStatusItem?.title = "Keyboard shortcuts unavailable: \(issues.count) issue(s)"
+            self?.shortcutStatusItem?.toolTip = issues.joined(separator: "\n")
+        }
 
         let trusted = AXIsProcessTrusted()
         NSLog("[Tabbed] accessibility trusted = \(trusted)")
@@ -33,8 +41,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         permissionTimer = timer
         RunLoop.main.add(timer, forMode: .common)
-        refreshAccessibilityStartup()
-        if !trusted { showAccessibilityHelp() }
+        RunLoop.main.add(timer, forMode: .modalPanel)
+        // Install global observers after AppKit has finished its launch turn.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, !self.controller.isStopping else { return }
+            self.refreshAccessibilityStartup()
+            if !AXIsProcessTrusted() { self.showAccessibilityHelp() }
+        }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -71,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        defer { WindowDiagnostics.recorder.stop() }
         stopPermissionPolling()
         // Respect the confirmed escape path: a fallback must not move windows
         // again after the user explicitly chose to leave them as they are.
@@ -90,6 +104,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                      accessibilityDescription: "Tabbed")
         let menu = NSMenu()
         monitoringStatusItem = menu.addItem(withTitle: "Waiting for Accessibility Permission…", action: nil, keyEquivalent: "")
+        shortcutStatusItem = menu.addItem(withTitle: "", action: nil, keyEquivalent: "")
+        shortcutStatusItem?.isHidden = true
         item.button?.appearsDisabled = true
         menu.addItem(.separator())
         let autoAddItem = menu.addItem(
@@ -123,6 +139,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(withTitle: "Accessibility Permission Help…",
                      action: #selector(showAccessibilityHelp), keyEquivalent: "").target = self
         menu.addItem(.separator())
+        diagnosticMenuItem = menu.addItem(withTitle: "Record Window Diagnostics",
+            action: #selector(toggleWindowDiagnostics), keyEquivalent: "")
+        diagnosticMenuItem?.target = self
+        diagnosticMenuItem?.toolTip = "Records window IDs, geometry and AX results locally. No titles, URLs or page content. Off by default; two log files, up to 8 MiB each."
+        WindowDiagnostics.recorder.onStateChange = { [weak self] in
+            self?.diagnosticMenuItem?.state = WindowDiagnostics.isRecording ? .on : .off
+            self?.diagnosticMenuItem?.title = WindowDiagnostics.recorder.failure == nil
+                ? "Record Window Diagnostics" : "Record Window Diagnostics (Stopped: Log Error)"
+        }
+        menu.addItem(withTitle: "Show Window Diagnostic Logs…",
+                     action: #selector(showWindowDiagnosticLogs), keyEquivalent: "").target = self
+        menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Tabbed",
                      action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = menu
@@ -149,12 +177,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.open(TabbedConfig.ensureFileExists())
     }
 
+    @objc private func toggleWindowDiagnostics() {
+        if WindowDiagnostics.isRecording {
+            WindowDiagnostics.recorder.stop()
+        } else {
+            do {
+                try WindowDiagnostics.recorder.start()
+                controller.recordInputMonitoringDiagnostics()
+            }
+            catch {
+                let alert = NSAlert()
+                alert.messageText = "Window diagnostics could not start"
+                alert.informativeText = "The local diagnostic log could not be opened safely. No permissions or window settings were changed."
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+        }
+    }
+
+    @objc private func showWindowDiagnosticLogs() {
+        let directory = WindowDiagnostics.recorder.directory
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        NSWorkspace.shared.open(directory)
+    }
+
     @objc private func openAXSettings() {
         // Register/request access only as a result of an explicit user action.
-        // Dismiss our guidance first, so it does not cover the system prompt.
+        // Let the system prompt's Open System Settings button handle navigation.
+        // Opening Settings here would leave the asynchronous prompt unanswered.
         _ = ensureAccessibilityPermission()
-        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-        NSWorkspace.shared.open(url)
     }
 
     // MARK: - Permissions
@@ -165,19 +216,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             refreshAccessibilityStartup()
             return
         }
-        let alert = NSAlert()
-        alert.messageText = "Accessibility access is not active"
-        alert.informativeText = codeSignature.accessibilityRecoveryMessage(appPath: appBundleURL.path)
-        alert.addButton(withTitle: "Open Accessibility Settings…")
-        alert.addButton(withTitle: "Show Current App in Finder")
-        alert.addButton(withTitle: "Not Now")
-        let response = alert.runModal()
-        // Permission can change while the modal loop processes timer callbacks.
+        if let panel = accessibilityHelpPanel {
+            presentAccessibilityHelp(panel)
+            return
+        }
+        let panel = AccessibilityHelpPanel(
+            information: codeSignature.accessibilityRecoveryMessage(appPath: appBundleURL.path)
+        ) { [weak self] response in self?.handleAccessibilityHelpResponse(response) }
+        accessibilityHelpPanel = panel
+        presentAccessibilityHelp(panel)
+    }
+
+    private func presentAccessibilityHelp(_ panel: AccessibilityHelpPanel) {
+        // An accessory app may be inactive when launched. Ordering a key
+        // window alone need not bring it above the current foreground app.
+        // Only initial presentation and an explicit Help request activate us;
+        // permission polling must leave Settings and other apps in front.
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        panel.window.makeKeyAndOrderFront(nil)
+        panel.window.orderFrontRegardless()
+    }
+
+    private func handleAccessibilityHelpResponse(_ response: NSApplication.ModalResponse) {
         guard !controller.isStopping else { return }
         if response == .alertFirstButtonReturn {
             openAXSettings()
         } else if response == .alertSecondButtonReturn {
             NSWorkspace.shared.activateFileViewerSelecting([appBundleURL])
+        } else {
+            accessibilityHelpPanel?.window.orderOut(nil)
+            accessibilityHelpPanel = nil
         }
     }
 
@@ -187,7 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showMonitoringStatus("Waiting for Accessibility Permission…", active: false)
             return
         }
-        // Trust can become visible before event taps can be created. Retry
+        // Trust can become visible before observers can be installed. Retry
         // without repeatedly prompting, relaunching, or claiming readiness.
         guard now >= nextMonitoringAttempt else { return }
         nextMonitoringAttempt = now.addingTimeInterval(5)
@@ -198,6 +266,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         monitoringStarted = true
         stopPermissionPolling()
         showMonitoringStatus("Tabbed — Window management active", active: true)
+        accessibilityHelpPanel?.window.orderOut(nil)
+        accessibilityHelpPanel = nil
         NSLog("[Tabbed] controller started — global ⌘-drag monitor active")
     }
 

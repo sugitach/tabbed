@@ -3,7 +3,7 @@ import CoreGraphics
 
 // Deliberate test doubles. No AppKit/ApplicationServices import or OS window access.
 typealias WindowID = UInt32
-enum SimulatedAXError { case success, invalidUIElement, cannotComplete, apiDisabled, failure, notImplemented }
+enum SimulatedAXError: Int32 { case success, invalidUIElement, cannotComplete, apiDisabled, failure, notImplemented }
 @MainActor enum Trace {
     static var events: [String] = []
     static func add(_ event: String) { events.append(event) }
@@ -68,6 +68,7 @@ enum SimulatedAXError { case success, invalidUIElement, cannotComplete, apiDisab
     func hide() { Trace.add("panel.hide") }
 }
 @MainActor final class TabGroup {
+    let id = UUID()
     var windows: [ManagedWindow]
     var activeIndex = 0
     var contentFrame: CGRect
@@ -126,6 +127,11 @@ struct WindowFrame { let id: WindowID }
     static let shared = NSWorkspace()
     let notificationCenter = Center()
     var shownApps: [URL] = []
+    var openedURLs: [URL] = []
+    @discardableResult func open(_ url: URL) -> Bool {
+        openedURLs.append(url)
+        return true
+    }
     func activateFileViewerSelecting(_ urls: [URL]) { shownApps += urls }
     @MainActor final class Center {
         func removeObserver(_ object: AnyObject) { Trace.add("workspace.removeObserver") }
@@ -141,10 +147,29 @@ let kAXWindowAttribute = "window"
 
 // Only the optional normal-termination callbacks are modeled. No real app or UI.
 @MainActor final class NSApplication {
+    static let shared = NSApplication()
+    var aborts = 0
+    var presentationActions: [String] = []
+    func activate(ignoringOtherApps: Bool) {
+        presentationActions.append(ignoringOtherApps ? "activate" : "activateWithoutIgnoring")
+    }
+    func abortModal() { aborts += 1 }
     enum TerminateReply { case terminateNow, terminateCancel }
     enum ModalResponse { case alertFirstButtonReturn, alertSecondButtonReturn, alertThirdButtonReturn, abort }
 }
+@MainActor final class AlertWindow {
+    var hidden = false
+    func orderOut(_ sender: Any?) { hidden = true }
+    var onPresent: (() -> Void)?
+    func makeKeyAndOrderFront(_ sender: Any?) {
+        NSApplication.shared.presentationActions.append("key")
+        hidden = false
+        onPresent?()
+    }
+    func orderFrontRegardless() { NSApplication.shared.presentationActions.append("front") }
+}
 @MainActor final class NSAlert {
+    let window = AlertWindow()
     struct Presentation {
         let message: String
         let information: String
@@ -161,12 +186,29 @@ let kAXWindowAttribute = "window"
         return Self.responses.isEmpty ? .alertFirstButtonReturn : Self.responses.removeFirst()
     }
 }
+@MainActor final class AccessibilityHelpPanel {
+    let window = AlertWindow()
+    let messageText = "Accessibility access is not active"
+    let informativeText: String
+    let buttons = ["Open Accessibility Settings…", "Show Current App in Finder", "Not Now"]
+    let onResponse: (NSApplication.ModalResponse) -> Void
+    init(information: String, onResponse: @escaping (NSApplication.ModalResponse) -> Void) {
+        informativeText = information; self.onResponse = onResponse
+        window.onPresent = { [weak self] in
+            guard let self else { return }
+            NSAlert.presentations.append(.init(message: self.messageText,
+                information: self.informativeText, buttons: self.buttons))
+            if !NSAlert.responses.isEmpty { self.onResponse(NSAlert.responses.removeFirst()) }
+        }
+    }
+}
 @MainActor final class AppDelegate {
     let controller: TabGroupController
     var quitWithoutRestoring = false
     var monitoringStarted = false
     var nextMonitoringAttempt = Date.distantPast
     var permissionTimer: Timer?
+    var accessibilityHelpPanel: AccessibilityHelpPanel?
     var monitoringStatus = ""
     var monitoringActive = false
     var appBundleURL = URL(fileURLWithPath: "/Regression Fixture/Tabbed Dev.app")
@@ -184,7 +226,10 @@ let kAXWindowAttribute = "window"
         refreshAccessibilityStartup(now: now)
 #endif
     }
-    func openAXSettings() { settingsRequests += 1 }
+    func ensureAccessibilityPermission() -> Bool {
+        settingsRequests += 1
+        return AXIsProcessTrusted()
+    }
     func presentPermissionHelp() {
 #if HAS_PERMISSION_HELP
         showAccessibilityHelp()
@@ -212,6 +257,7 @@ let kAXWindowAttribute = "window"
     let engine = AXWindowEngine()
     let dragMonitor = Probe("drag"), keyboardMonitor = Probe("key")
     let observer = Probe("window"), appFocusObserver = Probe("focus"), windowCreationObserver = Probe("creation")
+    var windowLifecycleTimer: Timer?
     var isStopping = false
     var isStarted = false
     var startupObservers: [String] = []
@@ -237,7 +283,8 @@ let kAXWindowAttribute = "window"
     func add(_ window: ManagedWindow, to group: TabGroup) {
         addedWindows.append(window.id); group.windows.append(window)
     }
-    func endTrackingActiveMove() { Trace.add("tracking.stop") }
+    var activeMoveGroup: TabGroup?
+    func endTrackingActiveMove(restorePanel: Bool = true) { Trace.add("tracking.stop") }
     func resetDragState() { draggedWindow = nil; Trace.add("drag.reset") }
     func applyLayout(for group: TabGroup) { Trace.add("layout") }
     func updateFocusObservers() { Trace.add("focus.update") }
@@ -245,5 +292,12 @@ let kAXWindowAttribute = "window"
     func syncPanelZOrderWithFrontmostGroupSoon() { Trace.add("zorder") }
     func positionPanel(for group: TabGroup) { Trace.add("panel.position") }
     func beginTrackingActiveMove(for group: TabGroup) { Trace.add("tracking.start") }
+    func adoptTrackedFrame(_ frame: CGRect, for group: TabGroup) {
+        group.contentFrame = frame
+        positionPanel(for: group)
+    }
     func group(containing id: UInt32) -> TabGroup? { groups.first { $0.windows.contains { $0.id == id } } }
 }
+
+// OS inventory is unknown in tests unrelated to closure detection.
+enum WindowServerSnapshot { static func windowOwners() -> [WindowID: pid_t]? { nil } }

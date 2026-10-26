@@ -8,6 +8,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     private lazy var dragMonitor: DragMonitor = {
         let m = DragMonitor(engine: engine)
         m.delegate = self
+        m.onMouseInteraction = { [weak self] in self?.mouseInteractionDidOccur() }
         return m
     }()
 
@@ -37,8 +38,12 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     var isApplyingLayout = false
     weak var mostRecentGroup: TabGroup?
 
+    var panelZOrderSyncGeneration = 0
+
     var activeMoveTimer: Timer?
     weak var activeMoveGroup: TabGroup?
+    // Diagnostic origin only; does not change which window the existing tracker reads.
+    var activeMoveOriginWindowID: WindowID?
     var activeMoveDeadline: Date = .distantPast
     var windowLifecycleTimer: Timer?
 
@@ -76,6 +81,10 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
         return true
     }
 
+    func recordInputMonitoringDiagnostics() {
+        dragMonitor.recordMonitoringDiagnostics()
+    }
+
     /// Re-read `~/.config/tabbed.toml` and apply any keyboard-shortcut changes.
     func reloadConfig() {
         guard !isStopping else { return }
@@ -105,13 +114,19 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
         let snapshot = groups
         for group in snapshot { group.panel.hide() }
         let entries = snapshot.flatMap { group in
-            group.windows.map { ($0, group.contentFrame) }
+            group.windows.enumerated().map { index, window in
+                (window, WindowRestoration.ungroupedFrame(group.contentFrame, index: index))
+            }
         }
+        WindowDiagnostics.record(.init(event: .terminationRestoreBegin,
+            memberIDs: entries.map { $0.0.id }))
         let failures = WindowRestoration.restore(
             entries, screens: NSScreen.screens.map(\.visibleFrame),
             isAlive: { !self.engine.isKnownClosed($0) },
             move: { self.engine.restoreFrame($1, of: $0) }
         )
+        WindowDiagnostics.record(.init(event: .terminationRestoreResult,
+            memberIDs: failures.map(\.id)))
         if failures.isEmpty {
             groups.removeAll()
             mostRecentGroup = nil
@@ -125,6 +140,12 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
         guard !isStopping else { return }
         guard let window else { return }
         draggedWindow = window
+        if let group = group(containing: window.id), group.activeWindow?.id == window.id {
+            beginTrackingActiveMove(for: group)
+            if let frame = engine.windowServerFrame(of: window.id) {
+                adoptTrackedFrame(frame, for: group)
+            }
+        }
         if let frame = engine.frame(of: window) {
             draggedSize = frame.size
             dragGrabOffset = CGSize(width: point.x - frame.minX, height: point.y - frame.minY)
@@ -133,17 +154,11 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
             dragGrabOffset = .zero
         }
         dragTargets = engine.onScreenWindowFrames(excluding: [window.id])
-        engine.raise(window)
     }
 
     func dragDidMove(to point: CGPoint) {
         guard !isStopping else { return }
-        guard let dragged = draggedWindow else { return }
-        if let size = draggedSize {
-            let origin = CGPoint(x: point.x - dragGrabOffset.width,
-                                 y: point.y - dragGrabOffset.height)
-            engine.setFrame(CGRect(origin: origin, size: size), of: dragged)
-        }
+        guard draggedWindow != nil else { return }
         if let hit = dragTargets.first(where: { $0.frame.contains(point) }) {
             dropIndicator.present(over: hit.frame)
         } else {
@@ -160,14 +175,30 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
             if let target = self.engine.window(at: point, excluding: [dragged.id]) {
                 self.formGroup(dragged: dragged, target: target)
             } else if let sourceGroup = self.group(containing: dragged.id) {
-                self.remove(dragged.id, from: sourceGroup, keepWindowObserved: false)
-                self.engine.activate(dragged)
+                // A native drag moves the whole stack; ungrouping remains an
+                // explicit tab action, including a drop outside any target.
+                if let frame = self.engine.windowServerFrame(of: dragged.id) {
+                    sourceGroup.contentFrame = frame
+                    self.positionPanel(for: sourceGroup)
+                }
             }
         }
     }
 
     func dragDidCancel() {
         resetDragState()
+    }
+
+    func dragDidEndWithoutGrouping(at point: CGPoint) {
+        guard !isStopping else { return }
+        resetDragState()
+    }
+
+    func dragGroupingDidCancel() {
+        // Continue moving the dragged window, but never offer a drop target
+        // again during this gesture, even if Command is pressed again.
+        dragTargets = []
+        dropIndicator.dismiss()
     }
 
     private func resetDragState() {
@@ -187,32 +218,41 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
             return
         }
 
+        let source = group(containing: dragged.id)
+        let existing = group(containing: target.id)
+        // Dropping onto another member of the same group changes nothing.
+        if let source, source === existing { return }
+        let incoming = source?.windows ?? [dragged]
         let targetSpace = engine.spaceID(of: target)
-        if let draggedSpace = engine.spaceID(of: dragged),
-           let targetSpace,
-           draggedSpace != targetSpace {
-            engine.move(dragged, toSpaceOf: target)
+        for window in incoming {
+            if let windowSpace = engine.spaceID(of: window),
+               let targetSpace, windowSpace != targetSpace {
+                engine.move(window, toSpaceOf: target)
+            }
         }
 
-        if let sourceGroup = group(containing: dragged.id), !sourceGroup.contains(target.id) {
-            remove(dragged.id, from: sourceGroup, keepWindowObserved: true)
+        // Transfer the group atomically. remove()/dissolve() would restore or
+        // re-layout its remaining windows midway through the transfer.
+        if let source {
+            if activeMoveGroup === source { endTrackingActiveMove(restorePanel: false) }
+            source.panel.hide()
+            groups.removeAll { $0 === source }
+            source.windows = []
         }
-
-        engine.setFrame(targetFrame, of: dragged)
 
         let destination: TabGroup
-        if let existing = group(containing: target.id) {
+        if let existing {
             destination = existing
             destination.contentFrame = targetFrame
             destination.spaceID = targetSpace
-            if !destination.contains(dragged.id) {
-                destination.windows.append(dragged)
+            for window in incoming where !destination.contains(window.id) {
+                destination.windows.append(window)
             }
             destination.activeIndex = destination.windows.firstIndex { $0.id == dragged.id } ?? destination.activeIndex
         } else {
             destination = TabGroup(
-                windows: [target, dragged],
-                activeIndex: 1,
+                windows: [target] + incoming,
+                activeIndex: 1 + (incoming.firstIndex { $0.id == dragged.id } ?? 0),
                 contentFrame: targetFrame,
                 spaceID: targetSpace
             )
@@ -227,6 +267,9 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     }
 
     private func wire(_ group: TabGroup) {
+        group.panel.onMouseUp = { [weak self] in
+            self?.dragMonitor.ownPanelMouseUp()
+        }
         group.viewModel.onSelect = { [weak self, weak group] id in
             guard let self, !self.isStopping, let group else { return }
             self.selectTab(id, in: group)
