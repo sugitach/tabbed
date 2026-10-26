@@ -3,7 +3,7 @@
 Run on macOS with the Command Line Tools or Xcode selected:
 
 ```sh
-python3 Tests/WindowLifecycle/run.py
+python3 StandaloneTests/WindowLifecycle/run.py
 ```
 
 The runner uses the selected macOS SDK and the host architecture. Set `SDKROOT`
@@ -16,5 +16,5 @@ synthesize input or change accessibility permissions. They do not replace a
 manual Chrome close-button test. Results and compiler logs are written to the
 printed temporary result directory.
 
-`WindowLifecycle` is excluded from the Xcode `TabbedTests` target because these
+The harness lives outside the Xcode `TabbedTests` source directory because these
 boundary doubles and the executable entry point are for this standalone runner.
