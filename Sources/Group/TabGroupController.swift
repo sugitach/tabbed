@@ -39,6 +39,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     var activeMoveTimer: Timer?
     weak var activeMoveGroup: TabGroup?
     var activeMoveDeadline: Date = .distantPast
+    var windowLifecycleTimer: Timer?
 
     init(engine: WindowEngine) {
         self.engine = engine
@@ -76,6 +77,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     /// Idempotent: a cancelled Quit stays stopped; the next Quit retries restoration.
     func restoreWindowsForTermination() -> [ManagedWindow] {
         isStopping = true
+        stopWindowLifecycleMonitoring()
         dragMonitor.stop()
         dragMonitor.delegate = nil
         keyboardMonitor.stop()

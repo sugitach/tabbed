@@ -104,21 +104,29 @@ extension TabGroupController {
     }
 
     func remove(_ id: WindowID, from group: TabGroup, keepWindowObserved: Bool) {
-        guard let idx = group.windows.firstIndex(where: { $0.id == id }) else { return }
-        group.windows.remove(at: idx)
+        removeWindows([id], from: group, keepWindowObserved: keepWindowObserved)
+    }
+
+    /// Remove a closure snapshot atomically, so layout never restores another
+    /// already-closed member while processing a batch of close events.
+    func removeWindows(_ ids: Set<WindowID>, from group: TabGroup, keepWindowObserved: Bool) {
+        let removed = group.windows.filter { ids.contains($0.id) }
+        guard !removed.isEmpty else { return }
+        let selectedID = group.activeWindow?.id
+        let removedBeforeSelection = group.windows.prefix(group.activeIndex).filter { ids.contains($0.id) }.count
+        let nextIndex = group.activeIndex - removedBeforeSelection
+        group.windows.removeAll { ids.contains($0.id) }
         if !keepWindowObserved {
-            observer.unobserve(id)
+            for window in removed { observer.unobserve(window.id) }
         }
+        group.activeIndex = group.windows.firstIndex { $0.id == selectedID }
+            ?? max(0, min(nextIndex, group.windows.count - 1))
+
+        if activeMoveGroup === group { endTrackingActiveMove() }
 
         if group.windows.count <= 1 {
             dissolve(group)
             return
-        }
-
-        if idx < group.activeIndex {
-            group.activeIndex -= 1
-        } else if group.activeIndex >= group.windows.count {
-            group.activeIndex = group.windows.count - 1
         }
 
         applyLayout(for: group)
@@ -132,6 +140,7 @@ extension TabGroupController {
             engine.setFrame(group.contentFrame, of: window)
         }
         groups.removeAll { $0 === group }
+        updateWindowLifecycleMonitoring()
         if mostRecentGroup === group {
             mostRecentGroup = groups.last
         }

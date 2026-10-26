@@ -14,6 +14,23 @@ struct WindowServerWindow {
 }
 
 enum WindowServerSnapshot {
+    /// All windows in this login session, including parked/offscreen windows.
+    /// A failed or incomplete query is unknown; callers must retain their groups.
+    static func windowOwners() -> [WindowID: pid_t]? {
+        guard let infos = CGWindowListCopyWindowInfo(.optionAll, CGWindowID(0)) as? [[String: Any]] else {
+            return nil
+        }
+        var owners: [WindowID: pid_t] = [:]
+        for info in infos {
+            guard let number = info[kCGWindowNumber as String] as? NSNumber,
+                  let pid = info[kCGWindowOwnerPID as String] as? NSNumber else {
+                return nil
+            }
+            owners[WindowID(number.uint32Value)] = pid_t(pid.int32Value)
+        }
+        return owners
+    }
+
     static func onScreenWindows(
         excludingOwnPID ownPID: pid_t,
         excluding excludedIDs: Set<WindowID> = []
