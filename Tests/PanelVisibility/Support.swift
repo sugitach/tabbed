@@ -130,7 +130,7 @@ let kAXResizedNotification = "resized"
     func markRecentlyUsed(_ group: Group) {}
     func updateFocusObservers() {}
     func updateWindowLifecycleMonitoring() {} // Covered by standalone WindowLifecycle tests.
-    func frontmostGroup() -> Group? { groups.first { $0.activeWindow?.id == engine.frontmost } }
+    func frontmostGroup(preferMainWindowForPID: pid_t? = nil) -> Group? { groups.first { $0.activeWindow?.id == engine.frontmost } }
     var syncCount = 0
     func syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: pid_t? = nil) { syncCount += 1; groups.forEach { reassertPanelZOrder(for: $0) } }
     var isStopping = false

@@ -73,6 +73,8 @@ import CoreGraphics
         c.engine.main[100] = 2
         c.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: 100)
         check(g.activeWindow?.id == 2 && c.selections == [2], "notification main change overrides stale focused attribute")
+        check(c.panelPositions == 1 && c.frontmostGroup(preferMainWindowForPID: 100) === g,
+              "selection and immediate panel lookup resolve the same main window")
         c.engine.main[100] = 44
         c.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: 100)
         check(c.selections == [2], "ungrouped main window is never adopted")
@@ -97,6 +99,31 @@ import CoreGraphics
         c.syncPanelZOrderWithFrontmostGroupSoon() // Subsequent focused/app event coalesces.
         RunLoop.main.run(until: Date().addingTimeInterval(0.8))
         check(g.activeWindow?.id == 2 && c.selections == [2], "coalesced focus events retain main intent through final retry")
+        check(c.frontmostGroup() === g, "shared shortcut/group lookup retains bounded main preference")
+        c.engine.main[100] = 44
+        check(c.frontmostGroup() == nil, "unrelated main cannot dispatch to stale focused group")
+        c.engine.main[100] = nil
+        check(c.frontmostGroup() == nil, "missing main cannot dispatch to stale focused group")
+        c.mainWindowPreferenceDeadline = .distantPast
+        c.engine.focused[100] = 2
+        check(c.frontmostGroup() === g, "expired preference resumes ordinary focused-window lookup")
+    }
+    do {
+        let (c, oldGroup) = fixture()
+        let targetGroup = TabGroup([ManagedWindow(4, 100), ManagedWindow(5, 100)])
+        c.groups.append(targetGroup)
+        c.engine.focused[100] = 1
+        c.engine.main[100] = 5
+        c.preferredMainWindowPID = 100
+        c.mainWindowPreferenceDeadline = Date().addingTimeInterval(1)
+        c.syncPanelZOrderWithFrontmostGroup()
+        check(targetGroup.activeWindow?.id == 5 && oldGroup.activeWindow?.id == 1,
+              "main change selects target group without altering stale-focus group")
+        check(c.frontmostGroup() === targetGroup, "two-group lookup never targets stale focused group")
+        NSWorkspace.shared.frontmostApplication = Application(200)
+        c.engine.focused[200] = 3
+        c.syncPanelZOrderWithFrontmostGroup()
+        check(c.frontmostGroup() === oldGroup, "main preference remains bound to its original PID")
     }
     print("PASS: \(checks) external-focus checks (real production methods; simulated AX/UI boundaries)")
 }

@@ -21,7 +21,7 @@ assert 'CGEvent.tap' not in monitor.read_text()
 with tempfile.TemporaryDirectory(prefix='tabbed-hotkeys-') as directory:
     out = Path(directory)
     panel = (ROOT/'Sources/Group/TabGroupController+PanelZOrder.swift').read_text()
-    (out/'FocusedGroup.swift').write_text('import AppKit\nextension TabGroupController {\n'+method(panel,'frontmostGroup')+'\n}')
+    (out/'FocusedGroup.swift').write_text('import AppKit\nextension TabGroupController {\n'+method(panel,'effectiveFocusedWindowID')+'\n'+method(panel,'frontmostGroup')+'\n}')
     subprocess.run(['/usr/bin/xcrun','swiftc','-swift-version','5','-module-cache-path',str(out/'cache'),
         str(ROOT/'Sources/Config/TOML.swift'), str(ROOT/'Sources/Config/TabbedConfig.swift'),
         str(monitor), str(ROOT/'Sources/Group/TabGroupController+Keyboard.swift'),

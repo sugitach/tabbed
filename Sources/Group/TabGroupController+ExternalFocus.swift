@@ -6,9 +6,8 @@ extension TabGroupController {
         guard !isStopping, !isApplyingLayout, draggedWindow == nil,
               let app = NSWorkspace.shared.frontmostApplication,
               app.processIdentifier != ownPID,
-              let focusedID = (preferMainWindowForPID == app.processIdentifier
-                  ? engine.mainWindowID(for: app.processIdentifier)
-                  : engine.focusedOrMainWindowID(for: app.processIdentifier)),
+              let focusedID = effectiveFocusedWindowID(for: app.processIdentifier,
+                  preferMainWindowForPID: preferMainWindowForPID),
               let group = groups.first(where: { group in
                   group.windows.contains { $0.id == focusedID && $0.pid == app.processIdentifier }
               }),

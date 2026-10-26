@@ -8,11 +8,20 @@ extension TabGroupController {
         syncPanelZOrderWithFrontmostGroupSoon()
     }
 
-    func frontmostGroup() -> TabGroup? {
+    func effectiveFocusedWindowID(for pid: pid_t, preferMainWindowForPID: pid_t? = nil) -> WindowID? {
+        let preferredPID = preferMainWindowForPID ??
+            (Date() <= mainWindowPreferenceDeadline ? preferredMainWindowPID : nil)
+        return preferredPID == pid
+            ? engine.mainWindowID(for: pid)
+            : engine.focusedOrMainWindowID(for: pid)
+    }
+
+    func frontmostGroup(preferMainWindowForPID: pid_t? = nil) -> TabGroup? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
         let pid = app.processIdentifier
         guard pid != ownPID,
-              let focusedID = engine.focusedOrMainWindowID(for: pid) else {
+              let focusedID = effectiveFocusedWindowID(for: pid,
+                  preferMainWindowForPID: preferMainWindowForPID) else {
             return nil
         }
         return groups.first { group in
@@ -43,7 +52,7 @@ extension TabGroupController {
     func syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: pid_t? = nil) {
         guard !isStopping else { return }
         selectExternallyFocusedWindow(preferMainWindowForPID: preferMainWindowForPID)
-        let frontmost = frontmostGroup()
+        let frontmost = frontmostGroup(preferMainWindowForPID: preferMainWindowForPID)
 
         if let frontmost, isGroupOnActiveSpace(frontmost) {
             markRecentlyUsed(frontmost)
