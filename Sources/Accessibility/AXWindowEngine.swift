@@ -49,6 +49,11 @@ final class AXWindowEngine: WindowEngine {
         )
     }
 
+    func existingWindow(id: WindowID, pid: pid_t) -> ManagedWindow? {
+        guard let snapshot = WindowServerSnapshot.window(id: id), snapshot.pid == pid else { return nil }
+        return managedWindow(id: id, pid: pid, ownerInfo: snapshot.ownerInfo)
+    }
+
     func frame(of window: ManagedWindow) -> CGRect? {
         guard let position = copyCGPointAttribute(kAXPositionAttribute, from: window.element),
               let size = copyCGSizeAttribute(kAXSizeAttribute, from: window.element) else {

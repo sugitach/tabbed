@@ -289,6 +289,10 @@ let kAXWindowAttribute = "window"
     func applyLayout(for group: TabGroup) { Trace.add("layout") }
     func updateFocusObservers() { Trace.add("focus.update") }
     func isGroupOnActiveSpace(_ group: TabGroup) -> Bool { true }
+    var sessionInteractionGeneration = 0
+    func captureSessionForTermination() {}
+    func persistSessionForTermination() {}
+    func restoreSavedGroups() {}
     func syncPanelZOrderWithFrontmostGroupSoon() { Trace.add("zorder") }
     func positionPanel(for group: TabGroup) { Trace.add("panel.position") }
     func beginTrackingActiveMove(for group: TabGroup) { Trace.add("tracking.start") }

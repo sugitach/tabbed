@@ -38,6 +38,13 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     var isApplyingLayout = false
     weak var mostRecentGroup: TabGroup?
 
+    let sessionStore: GroupSessionStore
+    var sessionForTermination: GroupSession?
+    var didRestoreSession = false
+    var sessionInteractionGeneration = 0
+    var pendingSessionGroups: [SavedWindowGroup] = []
+    var pendingSessionGeneration = 0
+
     var panelZOrderSyncGeneration = 0
     var preferredMainWindowPID: pid_t?
     var mainWindowPreferenceDeadline = Date.distantPast
@@ -49,8 +56,9 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     var activeMoveDeadline: Date = .distantPast
     var windowLifecycleTimer: Timer?
 
-    init(engine: WindowEngine) {
+    init(engine: WindowEngine, sessionStore: GroupSessionStore = .standard) {
         self.engine = engine
+        self.sessionStore = sessionStore
         super.init()
         observer.onEvent = { [weak self] id, notification in
             self?.handleWindowNotification(id: id, notification: notification)
@@ -82,6 +90,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
             observeRunningAppsForWindowCreation()
         }
         isStarted = true
+        restoreSavedGroups()
         return true
     }
 
@@ -98,6 +107,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
 
     /// Idempotent: a cancelled Quit stays stopped; the next Quit retries restoration.
     func restoreWindowsForTermination() -> [ManagedWindow] {
+        captureSessionForTermination()
         isStopping = true
         stopWindowLifecycleMonitoring()
         dragMonitor.stop()
@@ -141,6 +151,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     // MARK: - DragMonitorDelegate
 
     func dragDidBegin(window: ManagedWindow?, at point: CGPoint) {
+        sessionInteractionGeneration &+= 1
         guard !isStopping else { return }
         guard let window else { return }
         draggedWindow = window
@@ -270,7 +281,7 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
         applyLayout(for: destination)
     }
 
-    private func wire(_ group: TabGroup) {
+    func wire(_ group: TabGroup) {
         group.panel.onMouseUp = { [weak self] in
             self?.dragMonitor.ownPanelMouseUp()
         }
