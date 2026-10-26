@@ -1,6 +1,8 @@
 import AppKit
 import Carbon
 
+typealias WindowID = UInt32
+
 @MainActor final class FakeRegistrar: SystemHotKeyRegistering {
     var reserved: Set<SystemHotKeyChord> = []
     var fail: Set<SystemHotKeyChord> = []
@@ -42,6 +44,8 @@ struct FakeApp { let processIdentifier: Int32 }
 }
 @MainActor final class FakeEngine {
     var focusedID: UInt32? = 11
+    var mainID: UInt32?
+    func mainWindowID(for pid: Int32) -> UInt32? { mainID }
     func focusedOrMainWindowID(for pid: Int32) -> UInt32? { focusedID }
 }
 @MainActor final class TabGroupController {
@@ -49,6 +53,8 @@ struct FakeApp { let processIdentifier: Int32 }
     let engine = FakeEngine()
     var groups: [TabGroup] = []
     var selections: [UInt32] = []
+    var preferredMainWindowPID: pid_t?
+    var mainWindowPreferenceDeadline = Date.distantPast
     func isGroupOnActiveSpace(_ group: TabGroup) -> Bool { group.onActiveSpace }
     func selectTab(_ id: UInt32, in group: TabGroup) {
         selections.append(id)

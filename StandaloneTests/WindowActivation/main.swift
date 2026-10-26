@@ -67,6 +67,64 @@ import CoreGraphics
         c.syncPanelZOrderWithFrontmostGroup()
         check(c.selections == [2] && g.activeIndex == 1, "reentrant layout focus does not loop")
     }
+    do {
+        let (c, g) = fixture()
+        c.engine.focused[100] = 1 // Chrome's focused attribute still points at the old tab.
+        c.engine.main[100] = 2
+        c.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: 100)
+        check(g.activeWindow?.id == 2 && c.selections == [2], "notification main change overrides stale focused attribute")
+        check(c.panelPositions == 1 && c.frontmostGroup(preferMainWindowForPID: 100) === g,
+              "selection and immediate panel lookup resolve the same main window")
+        c.engine.main[100] = 44
+        c.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: 100)
+        check(c.selections == [2], "ungrouped main window is never adopted")
+        c.engine.main[100] = nil
+        c.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: 100)
+        check(c.selections == [2], "unknown main window does not fall back to stale focus")
+        c.engine.main[100] = 1
+        NSWorkspace.shared.frontmostApplication = Application(200)
+        c.engine.focused[200] = 3
+        c.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: 100)
+        check(g.activeWindow?.id == 3, "background main hint cannot override current frontmost app")
+        NSWorkspace.shared.frontmostApplication = Application(100)
+        c.engine.main[100] = 2 // Event originally concerned 1, but main changed again.
+        c.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: 100)
+        check(g.activeWindow?.id == 2, "latest main query wins over old notification")
+    }
+    do {
+        let (c, g) = fixture()
+        c.engine.focused[100] = 1
+        c.engine.main[100] = 2
+        c.syncPanelZOrderWithFrontmostGroupSoon(preferMainWindowForPID: 100)
+        c.syncPanelZOrderWithFrontmostGroupSoon() // Subsequent focused/app event coalesces.
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        check(g.activeWindow?.id == 2 && c.selections == [2], "coalesced focus events retain main intent through final retry")
+        check(c.frontmostGroup() === g, "shared shortcut/group lookup retains bounded main preference")
+        c.engine.main[100] = 44
+        check(c.frontmostGroup() == nil, "unrelated main cannot dispatch to stale focused group")
+        c.engine.main[100] = nil
+        check(c.frontmostGroup() == nil, "missing main cannot dispatch to stale focused group")
+        c.mainWindowPreferenceDeadline = .distantPast
+        c.engine.focused[100] = 2
+        check(c.frontmostGroup() === g, "expired preference resumes ordinary focused-window lookup")
+    }
+    do {
+        let (c, oldGroup) = fixture()
+        let targetGroup = TabGroup([ManagedWindow(4, 100), ManagedWindow(5, 100)])
+        c.groups.append(targetGroup)
+        c.engine.focused[100] = 1
+        c.engine.main[100] = 5
+        c.preferredMainWindowPID = 100
+        c.mainWindowPreferenceDeadline = Date().addingTimeInterval(1)
+        c.syncPanelZOrderWithFrontmostGroup()
+        check(targetGroup.activeWindow?.id == 5 && oldGroup.activeWindow?.id == 1,
+              "main change selects target group without altering stale-focus group")
+        check(c.frontmostGroup() === targetGroup, "two-group lookup never targets stale focused group")
+        NSWorkspace.shared.frontmostApplication = Application(200)
+        c.engine.focused[200] = 3
+        c.syncPanelZOrderWithFrontmostGroup()
+        check(c.frontmostGroup() === oldGroup, "main preference remains bound to its original PID")
+    }
     print("PASS: \(checks) external-focus checks (real production methods; simulated AX/UI boundaries)")
 }
 MainActor.assumeIsolated { run() }

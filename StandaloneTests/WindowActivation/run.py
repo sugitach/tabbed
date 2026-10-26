@@ -17,7 +17,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 ROOT = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else HERE.parents[1]
 OUT = Path(tempfile.mkdtemp(prefix='tabbed-activation-'))
-methods = {'Sources/Group/TabGroupController+ExternalFocus.swift': ('TabGroupController', ['selectExternallyFocusedWindow']), 'Sources/Group/TabGroupController+PanelZOrder.swift': ('TabGroupController', ['frontmostGroup', 'syncPanelZOrderWithFrontmostGroup'])}
+methods = {'Sources/Group/TabGroupController+ExternalFocus.swift': ('TabGroupController', ['selectExternallyFocusedWindow']), 'Sources/Group/TabGroupController+PanelZOrder.swift': ('TabGroupController', ['effectiveFocusedWindowID', 'frontmostGroup', 'syncPanelZOrderWithFrontmostGroup', 'syncPanelZOrderWithFrontmostGroupSoon'])}
 
 def extract(source, name):
     match = re.search(r'(?m)^    (?:private )?(?:static )?func ' + name + r'\(', source)

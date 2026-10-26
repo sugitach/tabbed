@@ -8,11 +8,20 @@ extension TabGroupController {
         syncPanelZOrderWithFrontmostGroupSoon()
     }
 
-    func frontmostGroup() -> TabGroup? {
+    func effectiveFocusedWindowID(for pid: pid_t, preferMainWindowForPID: pid_t? = nil) -> WindowID? {
+        let preferredPID = preferMainWindowForPID ??
+            (Date() <= mainWindowPreferenceDeadline ? preferredMainWindowPID : nil)
+        return preferredPID == pid
+            ? engine.mainWindowID(for: pid)
+            : engine.focusedOrMainWindowID(for: pid)
+    }
+
+    func frontmostGroup(preferMainWindowForPID: pid_t? = nil) -> TabGroup? {
         guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
         let pid = app.processIdentifier
         guard pid != ownPID,
-              let focusedID = engine.focusedOrMainWindowID(for: pid) else {
+              let focusedID = effectiveFocusedWindowID(for: pid,
+                  preferMainWindowForPID: preferMainWindowForPID) else {
             return nil
         }
         return groups.first { group in
@@ -21,24 +30,29 @@ extension TabGroupController {
         }
     }
 
-    func syncPanelZOrderWithFrontmostGroupSoon() {
+    func syncPanelZOrderWithFrontmostGroupSoon(preferMainWindowForPID: pid_t? = nil) {
         // Activation and AppKit ordering finish asynchronously. Coalesce focus
         // notifications, then recheck after the destination app has settled.
+        if let preferMainWindowForPID {
+            preferredMainWindowPID = preferMainWindowForPID
+            mainWindowPreferenceDeadline = Date().addingTimeInterval(1)
+        }
         panelZOrderSyncGeneration &+= 1
         let generation = panelZOrderSyncGeneration
         for delay in [0.0, 0.05, 0.15, 0.35, 0.75] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, !self.isStopping,
                       self.panelZOrderSyncGeneration == generation else { return }
-                self.syncPanelZOrderWithFrontmostGroup()
+                self.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID:
+                    Date() <= self.mainWindowPreferenceDeadline ? self.preferredMainWindowPID : nil)
             }
         }
     }
 
-    func syncPanelZOrderWithFrontmostGroup() {
+    func syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: pid_t? = nil) {
         guard !isStopping else { return }
-        selectExternallyFocusedWindow()
-        let frontmost = frontmostGroup()
+        selectExternallyFocusedWindow(preferMainWindowForPID: preferMainWindowForPID)
+        let frontmost = frontmostGroup(preferMainWindowForPID: preferMainWindowForPID)
 
         if let frontmost, isGroupOnActiveSpace(frontmost) {
             markRecentlyUsed(frontmost)

@@ -55,6 +55,9 @@ protocol WindowEngine: AnyObject {
     /// Focused or main window id for an app process, if AX can resolve it.
     func focusedOrMainWindowID(for pid: pid_t) -> WindowID?
 
+    /// Current main window, independently of a potentially stale focused window.
+    func mainWindowID(for pid: pid_t) -> WindowID?
+
     /// Frontmost visible standard-layer window from the window server.
     func frontmostWindowID() -> WindowID?
 
@@ -79,4 +82,9 @@ protocol WindowEngine: AnyObject {
     /// All currently displayed Spaces, including separate Spaces per display.
     func activeSpaceIDs() -> Set<UInt64>?
     func move(_ window: ManagedWindow, toSpaceOf reference: ManagedWindow)
+}
+
+// Engines without a main-window query retain the focused-window behavior.
+extension WindowEngine {
+    func mainWindowID(for pid: pid_t) -> WindowID? { nil }
 }

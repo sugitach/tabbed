@@ -121,12 +121,14 @@ let kAXResizedNotification = "resized"
     weak var mostRecentGroup: Group?
     let engine = Engine()
     var panelZOrderSyncGeneration = 0
+    var preferredMainWindowPID: pid_t?
+    var mainWindowPreferenceDeadline = Date.distantPast
     func wire(_ group: Group) {}
     func observeWindows(in group: Group) {}
     func markRecentlyUsed(_ group: Group) {}
     func updateFocusObservers() {}
     var syncCount = 0
-    func syncPanelZOrderWithFrontmostGroup() { syncCount += 1; groups.forEach { reassertPanelZOrder(for: $0) } }
+    func syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: pid_t? = nil) { syncCount += 1; groups.forEach { reassertPanelZOrder(for: $0) } }
     var isStopping = false
     var isApplyingLayout = false
     var draggedWindow: Window?
