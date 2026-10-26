@@ -6,10 +6,21 @@ extension TabGroupController {
         for window in group.windows {
             observer.observe(window)
         }
+        updateWindowLifecycleMonitoring()
     }
 
     func handleWindowNotification(id: WindowID, notification: String) {
         guard !isStopping else { return }
+
+        // AX setters can pump the run loop. Do not lose a close notification
+        // received inside layout, or mutate a group's members mid-layout.
+        if isApplyingLayout,
+           notification == kAXUIElementDestroyedNotification || notification == kAXWindowMiniaturizedNotification {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                self?.handleWindowNotification(id: id, notification: notification)
+            }
+            return
+        }
         guard !isApplyingLayout, let group = group(containing: id) else { return }
 
         switch notification {
