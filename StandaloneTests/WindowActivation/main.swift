@@ -125,6 +125,119 @@ import CoreGraphics
         c.syncPanelZOrderWithFrontmostGroup()
         check(c.frontmostGroup() === oldGroup, "main preference remains bound to its original PID")
     }
+    do {
+        let (c, g) = fixture()
+        let other = TabGroup([ManagedWindow(44, 100), ManagedWindow(45, 100)])
+        c.groups.append(other)
+        c.engine.focused[100] = 44
+        c.engine.main[100] = 2
+        c.applicationFocusDidChange(pid: 100, mainWindowChanged: true)
+        check(c.selections == [2] && g.activeWindow?.id == 2,
+              "main transition is handled synchronously before queued bounce")
+        c.engine.main[100] = 44
+        c.applicationFocusDidChange(pid: 100, mainWindowChanged: true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        check(c.selections == [2] && other.activeWindow?.id == 44,
+              "bounce to another group's already active window cannot lose revealed target")
+    }
+    do {
+        let (c, g) = fixture()
+        c.engine.focused[100] = 44
+        c.engine.main[100] = 44
+        c.applicationFocusDidChange(pid: 100, mainWindowChanged: true)
+        check(c.selections.isEmpty && g.activeIndex == 0,
+              "already stale main transition never replays a notification target")
+        c.engine.main[100] = 2
+        c.applicationFocusDidChange(pid: 100, mainWindowChanged: false)
+        check(c.selections.isEmpty, "ordinary focus observation remains deferred")
+        c.isStopping = true
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        check(c.selections.isEmpty, "shutdown cancels pending application focus work")
+    }
+    for scenario in 0..<5 {
+        let (c, g) = fixture()
+        c.engine.main[100] = 2
+        switch scenario {
+        case 0: c.isApplyingLayout = true
+        case 1: c.draggedWindow = g.windows[0]
+        case 2: g.moveAnchorFrame = g.contentFrame
+        case 3: g.onActiveSpace = false
+        default: NSWorkspace.shared.frontmostApplication = Application(200)
+        }
+        c.applicationFocusDidChange(pid: 100, mainWindowChanged: true)
+        check(c.selections.isEmpty, "immediate focus respects existing safety guard \(scenario)")
+        c.isStopping = true
+    }
+    do {
+        let (c, g) = fixture()
+        let other = TabGroup([ManagedWindow(44, 100), ManagedWindow(45, 100)])
+        c.groups.append(other)
+        // Captured Chrome sequence: the callback concerns 2, but both live AX
+        // attributes already point back to the other group's active window 44.
+        c.engine.focused[100] = 44
+        c.engine.main[100] = 44
+        c.activeMoveGroup = g
+        c.applicationFocusDidChange(pid: 100, mainWindowChanged: true,
+                                    element: axElement("window-100-2"))
+        check(c.selections == [2] && g.activeWindow?.id == 2,
+              "exact main transition survives already-stale live attributes")
+        check(c.selectedFrames == [g.contentFrame] && c.trackingEnds == 1,
+              "notification selection preserves geometry and ends stale tracking")
+        c.applicationFocusDidChange(pid: 100, mainWindowChanged: true,
+                                    element: other.windows[0].element)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        check(c.selections == [2] && other.activeWindow?.id == 44,
+              "bounce to already-active other group and settled checks do not undo selection")
+        c.engine.main[100] = 1
+        c.syncPanelZOrderWithFrontmostGroup()
+        check(c.selections == [2, 1], "later live state is honored without replaying the event target")
+    }
+    for scenario in 0..<13 {
+        let (c, g) = fixture()
+        c.engine.focused[100] = 44
+        c.engine.main[100] = 44
+        var element = g.windows[1].element
+        var pid: Int32 = 100
+        switch scenario {
+        case 0: c.isStopping = true
+        case 1: c.isApplyingLayout = true
+        case 2: c.draggedWindow = g.windows[0]
+        case 3: g.moveAnchorFrame = g.contentFrame
+        case 4: g.onActiveSpace = false
+        case 5: NSWorkspace.shared.frontmostApplication = Application(200)
+        case 6: c.engine.deadIDs.insert(2)
+        case 7: c.groups = []
+        case 8: element = axElement("unrelated-element")
+        case 9: pid = 200; NSWorkspace.shared.frontmostApplication = Application(200)
+        case 10: element = g.windows[0].element
+        case 11: NSWorkspace.shared.frontmostApplication = nil
+        default: pid = c.ownPID; NSWorkspace.shared.frontmostApplication = Application(pid)
+        }
+        c.applicationFocusDidChange(pid: pid, mainWindowChanged: true, element: element)
+        check(c.selections.isEmpty, "main notification identity/liveness/safety guard \(scenario)")
+        c.isStopping = true
+    }
+    do {
+        let (c, g) = fixture()
+        c.engine.focused[100] = 44
+        c.engine.main[100] = 44
+        c.applicationFocusDidChange(pid: 100, mainWindowChanged: false, element: g.windows[1].element)
+        check(c.selections.isEmpty, "ordinary focus element cannot trigger synchronous selection")
+        c.isStopping = true
+        RunLoop.main.run(until: Date().addingTimeInterval(0.8))
+        check(c.selections.isEmpty, "ordinary event target is never retained or replayed")
+    }
+    do {
+        let (c, g) = fixture()
+        c.engine.focused[100] = 44
+        c.engine.main[100] = 44
+        c.duringSelection = {
+            c.applicationFocusDidChange(pid: 100, mainWindowChanged: true, element: g.windows[0].element)
+        }
+        c.applicationFocusDidChange(pid: 100, mainWindowChanged: true, element: g.windows[1].element)
+        check(c.selections == [2], "layout-generated main transitions cannot recursively change selection")
+        c.isStopping = true
+    }
     print("PASS: \(checks) external-focus checks (real production methods; simulated AX/UI boundaries)")
 }
 MainActor.assumeIsolated { run() }

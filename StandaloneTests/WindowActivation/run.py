@@ -17,7 +17,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 ROOT = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else HERE.parents[1]
 OUT = Path(tempfile.mkdtemp(prefix='tabbed-activation-'))
-methods = {'Sources/Group/TabGroupController+ExternalFocus.swift': ('TabGroupController', ['selectExternallyFocusedWindow']), 'Sources/Group/TabGroupController+PanelZOrder.swift': ('TabGroupController', ['effectiveFocusedWindowID', 'frontmostGroup', 'syncPanelZOrderWithFrontmostGroup', 'syncPanelZOrderWithFrontmostGroupSoon'])}
+methods = {'Sources/Group/TabGroupController+ExternalFocus.swift': ('TabGroupController', ['applicationFocusDidChange', 'selectNotifiedMainWindow', 'selectExternallyFocusedWindow', 'selectExternallyActivatedWindow']), 'Sources/Group/TabGroupController+PanelZOrder.swift': ('TabGroupController', ['effectiveFocusedWindowID', 'frontmostGroup', 'syncPanelZOrderWithFrontmostGroup', 'syncPanelZOrderWithFrontmostGroupSoon'])}
 
 def extract(source, name):
     match = re.search(r'(?m)^    (?:private )?(?:static )?func ' + name + r'\(', source)
@@ -31,7 +31,7 @@ def extract(source, name):
         if depth == 0: return source[match.start():end+1]
     raise RuntimeError('Unbalanced method: ' + name)
 
-pieces = ['import Foundation\nimport CoreGraphics\n']
+pieces = ['import Foundation\nimport CoreFoundation\nimport CoreGraphics\n']
 hashes = {}
 for path, (owner, names) in methods.items():
     data = (ROOT/path).read_bytes()

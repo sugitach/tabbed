@@ -13,6 +13,7 @@ final class AXAppObserverBridge {
     }
 
     private var observations: [pid_t: Observation] = [:]
+    private var diagnosticGeneration: [pid_t: UInt64] = [:]
 
     func observe(pid: pid_t, notifications: [String]) {
         guard !notifications.isEmpty else { return }
@@ -84,6 +85,7 @@ final class AXAppObserverBridge {
     }
 
     func unobserve(_ pid: pid_t) {
+        diagnosticGeneration.removeValue(forKey: pid)
         guard let observation = observations.removeValue(forKey: pid) else { return }
         CFRunLoopRemoveSource(CFRunLoopGetMain(), observation.source, .commonModes)
     }
@@ -113,8 +115,27 @@ final class AXAppObserverBridge {
                 WindowDiagnostics.record(.init(event: .applicationNotification, pid: pid,
                     resolvedWindowID: resolved, status: result.rawValue,
                     notification: WindowDiagnostics.notification(notification as String)))
+                bridge.scheduleFocusDiagnostics(pid: pid, notification: notification as String)
             }
             bridge.onEvent?(pid, notification as String, element)
+        }
+    }
+
+    private func scheduleFocusDiagnostics(pid: pid_t, notification: String) {
+        // Do not query other applications for window-creation observations.
+        guard notification == kAXFocusedWindowChangedNotification ||
+              notification == kAXMainWindowChangedNotification ||
+              notification == kAXApplicationActivatedNotification ||
+              notification == kAXFocusedUIElementChangedNotification else { return }
+        let generation = (diagnosticGeneration[pid] ?? 0) &+ 1
+        diagnosticGeneration[pid] = generation
+        for delay in [0.0, 0.1, 0.75] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self, WindowDiagnostics.isRecording,
+                      self.observations[pid] != nil,
+                      self.diagnosticGeneration[pid] == generation else { return }
+                AXFocusDiagnostics.record(pid: pid, notification: notification, delay: delay)
+            }
         }
     }
 }

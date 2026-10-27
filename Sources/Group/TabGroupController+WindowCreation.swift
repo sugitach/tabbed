@@ -30,7 +30,9 @@ extension TabGroupController {
             notifications: [
                 kAXFocusedWindowChangedNotification,
                 kAXMainWindowChangedNotification,
-                kAXApplicationActivatedNotification
+                kAXApplicationActivatedNotification,
+                // Diagnostic-only: content focus never selects a grouped tab.
+                kAXFocusedUIElementChangedNotification
             ]
         )
     }

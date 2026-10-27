@@ -13,10 +13,10 @@ struct WindowDiagnosticEntry: Codable, Equatable {
         case memberRemoved, groupDissolved
         case panelOrderSnapshot, panelOrderRepair
         case applicationNotification, terminationRestoreBegin, terminationRestoreResult
-        case inputMonitoringState
+        case inputMonitoringState, focusSnapshot, mainWindowRead
     }
     enum NotificationKind: String, Codable {
-        case moved, resized, destroyed, minimized, created, focusChanged, mainChanged, applicationActivated, other
+        case moved, resized, destroyed, minimized, created, focusChanged, mainChanged, applicationActivated, focusedElementChanged, other
     }
     enum Reason: String, Codable {
         case stopping, applyingLayout, unmanaged, unmatchedElement, inactive, unavailable
@@ -54,6 +54,15 @@ struct WindowDiagnosticEntry: Codable, Equatable {
     var receivedMouseEvent: Bool? = nil
     var startupReinstallCount: Int? = nil
     var gestureCandidateFound: Bool? = nil
+    var focusedWindowID: UInt32? = nil
+    var mainWindowID: UInt32? = nil
+    var focusedElementWindowID: UInt32? = nil
+    var focusedWindowStatus: Int32? = nil
+    var mainWindowStatus: Int32? = nil
+    var focusedElementWindowStatus: Int32? = nil
+    var frontmostPID: Int32? = nil
+    var frontmostWindowID: UInt32? = nil
+    var sampleDelay: Double? = nil
 }
 
 @MainActor
@@ -185,6 +194,7 @@ enum WindowDiagnostics {
         case "AXFocusedWindowChanged": return .focusChanged
         case "AXMainWindowChanged": return .mainChanged
         case "AXApplicationActivated": return .applicationActivated
+        case "AXFocusedUIElementChanged": return .focusedElementChanged
         default: return .other
         }
     }

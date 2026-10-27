@@ -1,4 +1,9 @@
 import Foundation
+import CoreFoundation
+typealias AXUIElement = CFString
+func axElement(_ token: String) -> AXUIElement {
+    CFStringCreateWithCString(nil, token, CFStringBuiltInEncodings.UTF8.rawValue)!
+}
 import CoreGraphics
 
 typealias WindowID = UInt32
@@ -13,7 +18,10 @@ typealias WindowID = UInt32
 @MainActor final class ManagedWindow {
     let id: WindowID
     let pid: Int32
-    init(_ id: WindowID, _ pid: Int32) { self.id = id; self.pid = pid }
+    let element: AXUIElement
+    init(_ id: WindowID, _ pid: Int32) {
+        self.id = id; self.pid = pid; self.element = axElement("window-\(pid)-\(id)")
+    }
 }
 @MainActor final class TabGroup {
     var windows: [ManagedWindow]
@@ -25,6 +33,8 @@ typealias WindowID = UInt32
     var activeWindow: ManagedWindow? { windows[activeIndex] }
 }
 @MainActor final class Engine {
+    var deadIDs: Set<WindowID> = []
+    func isAlive(_ window: ManagedWindow) -> Bool { !deadIDs.contains(window.id) }
     var focused: [Int32: WindowID] = [:]
     var main: [Int32: WindowID] = [:]
     func mainWindowID(for pid: Int32) -> WindowID? { main[pid] }
