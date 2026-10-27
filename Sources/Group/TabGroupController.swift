@@ -63,10 +63,11 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
         observer.onEvent = { [weak self] id, notification in
             self?.handleWindowNotification(id: id, notification: notification)
         }
-        appFocusObserver.onEvent = { [weak self] pid, notification, _ in
-            self?.syncPanelZOrderWithFrontmostGroupSoon(
-                preferMainWindowForPID: notification == kAXMainWindowChangedNotification ? pid : nil
-            )
+        appFocusObserver.onEvent = { [weak self] pid, notification, element in
+            guard notification != kAXFocusedUIElementChangedNotification else { return }
+            self?.applicationFocusDidChange(pid: pid,
+                mainWindowChanged: notification == kAXMainWindowChangedNotification,
+                element: element)
         }
         windowCreationObserver.onEvent = { [weak self] pid, notification, element in
             guard notification == kAXWindowCreatedNotification else { return }

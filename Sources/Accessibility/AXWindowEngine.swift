@@ -94,8 +94,11 @@ final class AXWindowEngine: WindowEngine {
     func mainWindowID(for pid: pid_t) -> WindowID? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 1.0)
-        guard let main = copyAXElementAttribute(kAXMainWindowAttribute, from: app) else { return nil }
-        return windowID(for: main)
+        let main = copyAXElementAttribute(kAXMainWindowAttribute, from: app).flatMap { windowID(for: $0) }
+        // Record the query used by reconciliation itself; no extra AX sampling
+        // delays the immediate check or changes its input.
+        WindowDiagnostics.record(.init(event: .mainWindowRead, pid: pid, mainWindowID: main))
+        return main
     }
 
     func frontmostWindowID() -> WindowID? {
