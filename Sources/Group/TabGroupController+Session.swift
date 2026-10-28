@@ -11,11 +11,13 @@ extension TabGroupController {
     /// Called before quit-time cascading/clearing, and kept across cancelled Quit retries.
     func captureSessionForTermination() {
         guard sessionForTermination == nil else { return }
+        if !displayTransitionPending { rememberDisplayLayouts() }
         var savedGroups = groups.compactMap { group -> SavedWindowGroup? in
             let windows = group.windows.compactMap { savedIdentity(for: $0) }
             guard windows.count >= 2 else { return nil }
             let selected = windows.first { $0.id == group.activeWindow?.id } ?? windows[0]
-            return SavedWindowGroup(windows: windows, selectedID: selected.id, frame: group.contentFrame)
+            return SavedWindowGroup(windows: windows, selectedID: selected.id, frame: group.contentFrame,
+                displayConfiguration: currentDisplayConfiguration, displayLayouts: group.displayLayouts)
         }
         // AX may still be resolving some startup groups when Quit begins.
         // Retain those groups unless explicit user interaction cancelled them.
@@ -49,6 +51,17 @@ extension TabGroupController {
 
     func restoreSessionGroups(_ savedGroups: [SavedWindowGroup], attemptsRemaining: Int) {
         guard !isStopping else { return }
+        if deferDisplayLayout() {
+            let generation = sessionInteractionGeneration
+            // Quit may happen before this deferred startup attempt runs.
+            pendingSessionGroups = savedGroups
+            pendingSessionGeneration = generation
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                guard let self, self.sessionInteractionGeneration == generation else { return }
+                self.restoreSessionGroups(savedGroups, attemptsRemaining: attemptsRemaining)
+            }
+            return
+        }
         var pending: [SavedWindowGroup] = []
         for saved in savedGroups {
             // Never revive a group already restored, manually regrouped, or ungrouped
@@ -78,10 +91,18 @@ extension TabGroupController {
             // Respect Space changes made while Tabbed was stopped.
             let space = engine.spaceID(of: active)
             guard windows.allSatisfy({ engine.spaceID(of: $0) == space }) else { continue }
-            guard let frame = WindowRestoration.destination(for: saved.frame,
+            let configuration = currentDisplayConfiguration
+            let remembered = configuration.flatMap { saved.displayLayouts?.frame(for: $0) }
+            let proposed: CGRect
+            if let remembered { proposed = remembered }
+            else if let savedConfiguration = saved.displayConfiguration, savedConfiguration != configuration {
+                proposed = engine.windowServerFrame(of: active.id) ?? engine.frame(of: active) ?? saved.frame
+            } else { proposed = saved.frame }
+            guard let frame = WindowRestoration.destination(for: proposed,
                 screens: NSScreen.screens.map(\.visibleFrame)) else { continue }
             let restored = TabGroup(windows: windows, activeIndex: activeIndex,
                 contentFrame: frame, spaceID: space)
+            restored.displayLayouts = saved.displayLayouts ?? DisplayLayoutHistory()
             groups.append(restored)
             wire(restored)
             observeWindows(in: restored)

@@ -30,7 +30,7 @@ extension TabGroupController: KeyboardShortcutMonitorDelegate {
     }
 
     private func shortcutGroup() -> TabGroup? {
-        guard !isStopping else { return nil }
+        guard !isStopping, !deferDisplayLayout() else { return nil }
         // Avoid one synchronous AX lookup per queued key. Validate the live
         // focused window again before committing any native window changes.
         if let pending = pendingShortcutSelection {
@@ -68,7 +68,7 @@ extension TabGroupController: KeyboardShortcutMonitorDelegate {
 
     private func commitShortcutSelection() {
         guard let pending = pendingShortcutSelection else { return }
-        guard !isStopping else { pendingShortcutSelection = nil; return }
+        guard !isStopping, !deferDisplayLayout() else { pendingShortcutSelection = nil; return }
         if isApplyingLayout || shortcutSelectionInProgress {
             scheduleShortcutSelection()
             return

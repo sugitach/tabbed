@@ -32,7 +32,7 @@ extension TabGroupController {
     }
 
     @objc func applicationDidTerminate(_ notification: Notification) {
-        guard !isStopping else { return }
+        guard !isStopping, !deferDisplayLayout() else { return }
         guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
             return
         }
@@ -45,7 +45,7 @@ extension TabGroupController {
     }
 
     func pruneDeadWindows() {
-        guard !isStopping else { return }
+        guard !isStopping, !deferDisplayLayout() else { return }
         for group in groups {
             // Unknown AX liveness must not discard a parked window's Quit target.
             for window in group.windows where engine.isKnownClosed(window) {
@@ -55,7 +55,7 @@ extension TabGroupController {
     }
 
     @objc func activeSpaceChanged() {
-        guard !isStopping else { return }
+        guard !isStopping, !deferDisplayLayout() else { return }
         pruneDeadWindows()
         for group in groups {
             if isGroupOnActiveSpace(group) {
@@ -67,12 +67,14 @@ extension TabGroupController {
     }
 
     @objc func applicationDidActivate(_ notification: Notification) {
-        guard !isStopping else { return }
+        guard !isStopping, !deferDisplayLayout() else { return }
         pruneDeadWindows()
         syncPanelZOrderWithFrontmostGroupSoon()
     }
 
     @objc func applicationDidLaunch(_ notification: Notification) {
+        // Installing an observer does not adopt/write geometry. A launch event
+        // skipped during display settlement will not be delivered again.
         guard !isStopping else { return }
         guard autoAddNewWindowsToStack,
               let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {

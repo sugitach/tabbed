@@ -5,7 +5,7 @@ extension TabGroupController {
     /// Handle main-window transitions before deferring/coalescing later events.
     func applicationFocusDidChange(pid: pid_t, mainWindowChanged: Bool,
                                    element: AXUIElement? = nil) {
-        guard !isStopping else { return }
+        guard !isStopping, !deferDisplayLayout() else { return }
         if mainWindowChanged {
             if let element {
                 selectNotifiedMainWindow(element, pid: pid)

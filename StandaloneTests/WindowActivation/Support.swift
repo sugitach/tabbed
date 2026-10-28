@@ -94,3 +94,7 @@ enum WindowDiagnostics {
     static func record(_ entry: DiagnosticEntry) {}
     static func frame(_ frame: CGRect) -> [Double] { [] }
 }
+
+extension TabGroupController {
+    func deferDisplayLayout() -> Bool { false }
+}

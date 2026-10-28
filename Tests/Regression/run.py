@@ -17,10 +17,10 @@ selected = {
     'Sources/Group/TabGroupController+WindowLifecycle.swift': ('TabGroupController', ['updateWindowLifecycleMonitoring', 'stopWindowLifecycleMonitoring', 'reconcileWindowLifetimes'], []),
     'Sources/Accessibility/AXWindowEngine.swift': ('AXWindowEngine', ['isAlive', 'candidateWindowElements'], ['isKnownClosed']),
     'Sources/Group/TabGroupController.swift': ('TabGroupController', ['start'], ['restoreWindowsForTermination']),
-    'Sources/Group/TabGroupController+Workspace.swift': ('TabGroupController', ['pruneDeadWindows', 'applicationDidActivate', 'activeSpaceChanged'], []),
+    'Sources/Group/TabGroupController+Workspace.swift': ('TabGroupController', ['pruneDeadWindows', 'applicationDidActivate', 'activeSpaceChanged', 'applicationDidLaunch'], []),
     'Sources/Group/TabGroupController+GroupOperations.swift': ('TabGroupController', ['remove', 'removeWindows', 'dissolve', 'untab'], []),
     'Sources/Group/TabGroupController+AXSync.swift': ('TabGroupController', ['handleWindowNotification'], []),
-    'Sources/Group/TabGroupController+WindowCreation.swift': ('TabGroupController', ['handleWindowCreated', 'resolveAndAutoAddWindow', 'targetGroupForNewWindow'], []),
+    'Sources/Group/TabGroupController+WindowCreation.swift': ('TabGroupController', ['handleWindowCreated', 'resolveAndAutoAddWindow', 'targetGroupForNewWindow', 'observeAppForWindowCreation'], []),
     'Sources/App/AppDelegate.swift': ('AppDelegate', ['openAXSettings'], ['applicationShouldTerminate', 'applicationWillTerminate', 'refreshAccessibilityStartup', 'stopPermissionPolling', 'showAccessibilityHelp', 'presentAccessibilityHelp', 'handleAccessibilityHelpResponse']),
 }
 

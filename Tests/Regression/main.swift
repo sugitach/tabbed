@@ -201,6 +201,22 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     try check([1, 2, 3].allSatisfy { c.engine.frames[UInt32($0)] == frame.offsetBy(dx: CGFloat($0 - 1) * 32, dy: -CGFloat($0 - 1) * 32) }, "Existing negative-coordinate display must be preserved")
 }
 
+@MainActor func appLaunchDuringDisplayTransitionInstallsCreationObserver() throws {
+    let (c, w) = setup()
+    c.displayTransitionPending = true
+    let app = NSRunningApplication(processIdentifier: w[0].pid)!
+    let launch = Notification(name: Notification.Name("launch"),
+        userInfo: [NSWorkspace.applicationUserInfoKey: app])
+    c.applicationDidLaunch(launch)
+    try check(c.windowCreationObserver.observedPIDs == [w[0].pid],
+        "Display settlement must not lose the app launch observer registration")
+    try check(c.engine.writes.isEmpty, "Observer registration does not move a window")
+    c.autoAddNewWindowsToStack = false;c.applicationDidLaunch(launch)
+    c.autoAddNewWindowsToStack = true;c.isStopping = true;c.applicationDidLaunch(launch)
+    try check(c.windowCreationObserver.observedPIDs.count == 1,
+        "Disabled auto-add and shutdown still prevent registration")
+}
+
 @MainActor func windowCreationDoesNotAdoptUnrelatedFocusedWindow() throws {
     let (c, _) = setup([2])
     let destination = ManagedWindow(90)
@@ -660,6 +676,7 @@ MainActor.assumeIsolated {
         ("stopped callbacks preserve targets", stoppedCallbacksCannotDropOrRelayoutWindows),
         ("explicit untab keeps offset", explicitUntabKeepsExistingOffset),
         ("single survivor dissolves", oneRemainingWindowDissolvesSafely),
+        ("app launched during display transition stays observed", appLaunchDuringDisplayTransitionInstallsCreationObserver),
         ("creation cannot adopt unrelated focused/main window", windowCreationDoesNotAdoptUnrelatedFocusedWindow),
         ("closed transient cannot adopt focused destination", closedCreationDoesNotAdoptFocusedDestination),
         ("ordinary created window still auto-adds", directCreatedWindowStillAutoAdds),

@@ -108,6 +108,34 @@ import CoreGraphics
         try store.save(session)
     }
     do {
+        var history = DisplayLayoutHistory()
+        history.remember(frame, for: "A")
+        let remembered = SavedWindowGroup(windows: [a,b,d], selectedID: 2, frame: frame,
+            displayConfiguration: "A", displayLayouts: history)
+        let original = GroupSession(groups: [remembered])
+        try store.save(original)
+        let early = fixture(); early.displayTransitionPending = true
+        early.restoreSavedGroups()
+        check(early.groups.isEmpty && early.pendingSessionGroups.count == 1,
+            "topology transition defers and retains startup restoration")
+        early.isStopping = true; early.persistSessionForTermination()
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        let persisted = try store.load().map { try encoder.encode($0) }
+        let expected = try encoder.encode(original)
+        check(persisted == expected,
+            "Quit during topology transition preserves startup members, selection and layout history")
+        let cancel = fixture(); cancel.displayTransitionPending = true
+        cancel.restoreSavedGroups(); cancel.sessionInteractionGeneration += 1
+        cancel.persistSessionForTermination()
+        check(store.load()?.groups.isEmpty == true,
+            "explicit interaction discards topology-deferred startup state on Quit")
+        cancel.displayTransitionPending = false
+        RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+        check(cancel.groups.isEmpty && early.groups.isEmpty,
+            "cancelled and stopped topology-deferred callbacks cannot restore groups")
+        try store.save(session)
+    }
+    do {
         let bad = GroupSession(version: 2, groups: [saved])
         check(!bad.isValid, "unknown version rejected")
         let duplicate = GroupSession(groups: [SavedWindowGroup(windows: [a,a], selectedID: 1, frame: frame)])
@@ -126,6 +154,27 @@ import CoreGraphics
         try store.save(session)
         check(store.load()?.groups.count == 1, "atomic save replaces link, not its target")
         check(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("target").path), "symlink target untouched")
+    }
+    do {
+        // Old version-1 state has no display metadata and remains readable.
+        let old = try JSONDecoder().decode(GroupSession.self, from: JSONEncoder().encode(session))
+        check(old.isValid && old.groups[0].displayLayouts == nil, "legacy state remains valid")
+        var history = DisplayLayoutHistory()
+        let other = CGRect(x: 200, y: 150, width: 900, height: 650)
+        history.remember(frame, for: "A"); history.remember(other, for: "B")
+        let withHistory = SavedWindowGroup(windows: [a,b], selectedID: 1, frame: frame,
+            displayConfiguration: "A", displayLayouts: history)
+        try store.save(GroupSession(groups: [withHistory]))
+        check(store.load()?.groups[0].displayLayouts?.frame(for: "B") == other, "configuration history stored privately with session")
+        let returning = fixture(); returning.currentDisplayConfiguration = "B"
+        returning.restoreSessionGroups([withHistory], attemptsRemaining: 0)
+        check(returning.groups.first?.contentFrame == other, "startup uses remembered current-configuration frame")
+        let unseen = fixture(); unseen.currentDisplayConfiguration = "C"; unseen.engine.frames[1] = other
+        unseen.restoreSessionGroups([withHistory], attemptsRemaining: 0)
+        check(unseen.groups.first?.contentFrame == other, "startup in unseen configuration adopts OS frame")
+        let same = fixture(); same.currentDisplayConfiguration = "A"
+        same.restoreSessionGroups([withHistory], attemptsRemaining: 0)
+        check(same.groups.first?.contentFrame == frame, "startup in original configuration preserves original frame")
     }
     print("PASS: \(checks) group-session checks (production store/controller methods; simulated AX/process/UI)")
 }

@@ -48,7 +48,7 @@ sdk = os.environ.get('SDKROOT') or subprocess.check_output(
 compile_cmd = ['xcrun', 'swiftc', '-swift-version', '5', '-sdk', sdk,
                '-module-cache-path', str(OUT/'module-cache'),
                '-target', platform.machine() + '-apple-macosx14.0'] + flags + [str(OUT/name) for name in
-               ['Support.swift', 'ProductionMethods.swift', 'main.swift']] + [str(ROOT/'Sources/Group/GroupSession.swift'), str(ROOT/'Sources/Group/WindowRestoration.swift')] + ['-o', str(OUT/'tests')]
+               ['Support.swift', 'ProductionMethods.swift', 'main.swift']] + [str(ROOT/'Sources/Group/DisplayLayoutHistory.swift'), str(ROOT/'Sources/Group/GroupSession.swift'), str(ROOT/'Sources/Group/WindowRestoration.swift')] + ['-o', str(OUT/'tests')]
 result = subprocess.run(compile_cmd, capture_output=True, text=True)
 (OUT/'compile.log').write_text(result.stdout + result.stderr)
 print(result.stdout + result.stderr, end='')

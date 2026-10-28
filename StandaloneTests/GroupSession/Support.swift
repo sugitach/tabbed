@@ -22,6 +22,7 @@ enum NSScreen { static let screens = [Screen()] }
     init(_ id: WindowID, _ pid: Int32 = 100) { self.id = id; self.pid = pid }
 }
 @MainActor final class TabGroup {
+    var displayLayouts = DisplayLayoutHistory()
     var windows: [ManagedWindow]; var activeIndex: Int; var contentFrame: CGRect; var spaceID: UInt64?
     init(windows: [ManagedWindow], activeIndex: Int, contentFrame: CGRect, spaceID: UInt64?) {
         self.windows = windows; self.activeIndex = activeIndex; self.contentFrame = contentFrame; self.spaceID = spaceID
@@ -31,6 +32,9 @@ enum NSScreen { static let screens = [Screen()] }
 @MainActor final class Engine {
     var windows: [WindowID: ManagedWindow] = [:]
     var spaces: [WindowID: UInt64] = [:]
+    var frames: [WindowID: CGRect] = [:]
+    func frame(of window: ManagedWindow) -> CGRect? { frames[window.id] }
+    func windowServerFrame(of id: WindowID) -> CGRect? { nil }
     func existingWindow(id: WindowID, pid: Int32) -> ManagedWindow? {
         guard let w = windows[id], w.pid == pid else { return nil }; return w
     }
@@ -44,6 +48,8 @@ enum NSScreen { static let screens = [Screen()] }
     var sessionInteractionGeneration = 0
     var pendingSessionGroups: [SavedWindowGroup] = []
     var pendingSessionGeneration = 0
+    var displayTransitionPending = false
+    var currentDisplayConfiguration: String?
     var groups: [TabGroup] = []
     var wired = 0, observed = 0, layouts = 0
     init(_ store: GroupSessionStore) { sessionStore = store }
@@ -52,4 +58,9 @@ enum NSScreen { static let screens = [Screen()] }
     func observeWindows(in group: TabGroup) { observed += 1 }
     func updateFocusObservers() {}
     func applyLayout(for group: TabGroup) { layouts += 1 }
+}
+
+extension TabGroupController {
+    func deferDisplayLayout() -> Bool { displayTransitionPending }
+    func rememberDisplayLayouts() {}
 }
