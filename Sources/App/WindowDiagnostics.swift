@@ -13,7 +13,7 @@ struct WindowDiagnosticEntry: Codable, Equatable {
         case memberRemoved, groupDissolved
         case panelOrderSnapshot, panelOrderRepair
         case applicationNotification, terminationRestoreBegin, terminationRestoreResult
-        case inputMonitoringState, focusSnapshot, mainWindowRead
+        case inputMonitoringState, focusSnapshot, mainWindowRead, focusSelectionDeferred
     }
     enum NotificationKind: String, Codable {
         case moved, resized, destroyed, minimized, created, focusChanged, mainChanged, applicationActivated, focusedElementChanged, other
@@ -21,7 +21,7 @@ struct WindowDiagnosticEntry: Codable, Equatable {
     enum Reason: String, Codable {
         case stopping, applyingLayout, unmanaged, unmatchedElement, inactive, unavailable
         case beforeActivation, afterActivation, applicationGone, invalidElement, identityChanged, unknown
-        case valueEncodingFailed, identityMatches, dragging, wrongSpace
+        case valueEncodingFailed, identityMatches, dragging, wrongSpace, activationSettling
     }
     enum FrameSource: String, Codable { case accessibility, windowServer }
     var event: Event

@@ -65,12 +65,13 @@ extension TabGroupController {
             if index == group.activeIndex {
                 engine.setFrame(group.contentFrame, of: window)
             } else {
-                parkOffscreen(window)
+                parkOffscreen(window, relativeTo: group.contentFrame)
             }
         }
         if let active = group.activeWindow {
             engine.raise(active)
         }
+        group.focusSettlementUntil = ProcessInfo.processInfo.systemUptime + 1
         isApplyingLayout = false
         WindowDiagnostics.record(.init(event: .layoutEnd, groupID: group.id,
             activeWindowID: group.activeWindow?.id,
@@ -86,19 +87,74 @@ extension TabGroupController {
         syncPanelZOrderWithFrontmostGroupSoon()
     }
 
-    /// Park inactive tabs out of view without triggering AX clamping.
-    private func parkOffscreen(_ window: ManagedWindow) {
+    /// Leave only a one-point edge on the group's display, never on a neighbor.
+    private func parkOffscreen(_ window: ManagedWindow, relativeTo referenceFrame: CGRect) {
         guard let frame = engine.frame(of: window) else { return }
-        // Use the outer edge of the entire desktop, not a shared display edge.
-        guard let desktop = NSScreen.screens.map(\.frame).reduce(nil as CGRect?, { result, next in
-            result.map { $0.union(next) } ?? next
+        let screens = NSScreen.screens.map(\.frame)
+        func area(_ rect: CGRect) -> CGFloat {
+            rect.isNull ? 0 : max(0, rect.width) * max(0, rect.height)
+        }
+        func distance(to screen: CGRect) -> CGFloat {
+            let dx = max(screen.minX - referenceFrame.midX, 0, referenceFrame.midX - screen.maxX)
+            let dy = max(screen.minY - referenceFrame.midY, 0, referenceFrame.midY - screen.maxY)
+            return dx * dx + dy * dy
+        }
+        // The inactive window may already have been assigned to another display.
+        // Select from the group frame, not its current parked AX frame.
+        guard let sourceIndex = screens.indices.min(by: { lhs, rhs in
+            let left = area(screens[lhs].intersection(referenceFrame))
+            let right = area(screens[rhs].intersection(referenceFrame))
+            return left != right ? left > right : distance(to: screens[lhs]) < distance(to: screens[rhs])
         }) else { return }
-        let parked = CGRect(x: desktop.maxX - 1,
-                            y: desktop.minY + 1 - frame.height,
-                            width: frame.width, height: frame.height)
+        let source = screens[sourceIndex]
+        func parkingFrame(for size: CGSize) -> CGRect {
+            guard size.width > 1, size.height > 1 else { return referenceFrame }
+            var xs = [referenceFrame.minX, source.minX, source.maxX - size.width,
+                      source.minX - size.width + 1, source.maxX - 1]
+            var ys = [referenceFrame.minY, source.minY, source.maxY - size.height,
+                      source.minY - size.height + 1, source.maxY - 1]
+            for screen in screens {
+                // Neighbor boundaries are the points at which a safe interval can
+                // start or end. Include them for offset and partially shared edges.
+                xs += [screen.minX - size.width, screen.maxX]
+                ys += [screen.minY - size.height, screen.maxY]
+            }
+            var candidates: [CGRect] = []
+            // Prefer below the display, then its sides, then above it.
+            for x in xs {
+                candidates.append(CGRect(x: x, y: source.minY + 1 - size.height,
+                                         width: size.width, height: size.height))
+            }
+            for x in [source.minX + 1 - size.width, source.maxX - 1] {
+                for y in ys {
+                    candidates.append(CGRect(x: x, y: y, width: size.width, height: size.height))
+                }
+            }
+            for x in xs {
+                candidates.append(CGRect(x: x, y: source.maxY - 1,
+                                         width: size.width, height: size.height))
+            }
+            return candidates.first { candidate in
+                area(candidate.intersection(source)) > 0 && screens.indices.allSatisfy { index in
+                    index == sourceIndex || area(candidate.intersection(screens[index])) == 0
+                }
+            } ?? CGRect(origin: referenceFrame.origin, size: size)
+        }
+        let parked = parkingFrame(for: referenceFrame.size)
+        // A surrounded display may have no safe outside edge. In that case,
+        // stack behind the active member; applyLayout raises it after parking.
         WindowDiagnostics.record(.init(event: .parking, windowID: window.id, pid: window.pid,
             requestedFrame: WindowDiagnostics.frame(parked), axFrame: WindowDiagnostics.frame(frame)))
         engine.setFrame(parked, of: window)
+        // Applications may acknowledge an AX size request but retain a larger
+        // minimum size. Recompute the destination using the accepted dimensions
+        // so the real window cannot spill into an adjacent display.
+        if let actual = engine.frame(of: window), actual.size != parked.size {
+            let corrected = parkingFrame(for: actual.size)
+            WindowDiagnostics.record(.init(event: .parking, windowID: window.id, pid: window.pid,
+                requestedFrame: WindowDiagnostics.frame(corrected), axFrame: WindowDiagnostics.frame(actual)))
+            engine.setFrame(corrected, of: window)
+        }
     }
 
     func selectTab(_ id: WindowID, in group: TabGroup) {
@@ -116,9 +172,10 @@ extension TabGroupController {
             applyLayout(for: group)
         }
         if isGroupOnActiveSpace(group) {
+            group.focusSettlementUntil = ProcessInfo.processInfo.systemUptime + 1
             engine.activate(group.windows[idx])
             reassertPanelZOrder(for: group)
-            syncPanelZOrderWithFrontmostGroupSoon()
+            syncPanelZOrderWithFrontmostGroupSoon(preferMainWindowForPID: group.windows[idx].pid)
         }
     }
 

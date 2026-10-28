@@ -11,9 +11,10 @@ extension TabGroupController {
     func effectiveFocusedWindowID(for pid: pid_t, preferMainWindowForPID: pid_t? = nil) -> WindowID? {
         let preferredPID = preferMainWindowForPID ??
             (Date() <= mainWindowPreferenceDeadline ? preferredMainWindowPID : nil)
-        return preferredPID == pid
-            ? engine.mainWindowID(for: pid)
-            : engine.focusedOrMainWindowID(for: pid)
+        if preferredPID == pid, let mainID = engine.mainWindowID(for: pid) {
+            return mainID
+        }
+        return engine.focusedOrMainWindowID(for: pid)
     }
 
     func frontmostGroup(preferMainWindowForPID: pid_t? = nil) -> TabGroup? {
@@ -35,11 +36,11 @@ extension TabGroupController {
         // notifications, then recheck after the destination app has settled.
         if let preferMainWindowForPID {
             preferredMainWindowPID = preferMainWindowForPID
-            mainWindowPreferenceDeadline = Date().addingTimeInterval(1)
+            mainWindowPreferenceDeadline = Date().addingTimeInterval(1.5)
         }
         panelZOrderSyncGeneration &+= 1
         let generation = panelZOrderSyncGeneration
-        for delay in [0.0, 0.05, 0.15, 0.35, 0.75] {
+        for delay in [0.0, 0.05, 0.15, 0.35, 0.75, 1.1] {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self, !self.isStopping,
                       self.panelZOrderSyncGeneration == generation else { return }

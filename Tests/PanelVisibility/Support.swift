@@ -45,6 +45,7 @@ let kAXResizedNotification = "resized"
 @MainActor final class Group {
     var windows: [Window]
     let id = UUID()
+    var focusSettlementUntil: TimeInterval = 0
     var activeIndex = 0
     var spaceID: UInt64?
     var isPanelHiddenForMove = false

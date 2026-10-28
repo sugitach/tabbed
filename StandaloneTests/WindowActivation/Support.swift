@@ -24,15 +24,22 @@ typealias WindowID = UInt32
     }
 }
 @MainActor final class TabGroup {
+    let id = UUID()
+    final class Panel { func collapseAfterSelection() {} }
+    let panel = Panel()
     var windows: [ManagedWindow]
+    var focusSettlementUntil: TimeInterval = 0
     var activeIndex = 0
     var onActiveSpace = true
     var moveAnchorFrame: CGRect?
     let contentFrame = CGRect(x: 100, y: 200, width: 800, height: 600)
     init(_ windows: [ManagedWindow]) { self.windows = windows }
+    func contains(_ id: WindowID) -> Bool { windows.contains { $0.id == id } }
     var activeWindow: ManagedWindow? { windows[activeIndex] }
 }
 @MainActor final class Engine {
+    var activations: [WindowID] = []
+    func activate(_ window: ManagedWindow) { activations.append(window.id) }
     var deadIDs: Set<WindowID> = []
     func isAlive(_ window: ManagedWindow) -> Bool { !deadIDs.contains(window.id) }
     var focused: [Int32: WindowID] = [:]
@@ -41,6 +48,8 @@ typealias WindowID = UInt32
     func focusedOrMainWindowID(for pid: Int32) -> WindowID? { focused[pid] }
 }
 @MainActor final class TabGroupController {
+    var pendingShortcutSelection: PendingShortcutSelection?
+    var shortcutSelectionInProgress = false
     let ownPID: Int32 = 999
     let engine = Engine()
     var groups: [TabGroup] = []
@@ -50,16 +59,15 @@ typealias WindowID = UInt32
     var isStopping = false, isApplyingLayout = false
     var draggedWindow: ManagedWindow?
     var activeMoveGroup: TabGroup?
-    var selections: [WindowID] = []
+    var selections: [WindowID] { engine.activations }
+    var activeMoveOriginWindowID: WindowID?
     var trackingEnds = 0, panelPositions = 0, panelOrders = 0
     var selectedFrames: [CGRect] = []
     var duringSelection: (() -> Void)?
     func isGroupOnActiveSpace(_ group: TabGroup) -> Bool { group.onActiveSpace }
-    func endTrackingActiveMove() { activeMoveGroup = nil; trackingEnds += 1 }
-    // Layout/AX boundary: record the existing selection entry point and frame.
-    func selectTab(_ id: WindowID, in group: TabGroup) {
-        selections.append(id)
-        group.activeIndex = group.windows.firstIndex { $0.id == id }!
+    func endTrackingActiveMove() { if activeMoveGroup != nil { trackingEnds += 1 }; activeMoveGroup = nil }
+    // Real selectTab calls this simulated AX/layout boundary.
+    func applyLayout(for group: TabGroup) {
         selectedFrames.append(group.contentFrame)
         isApplyingLayout = true
         duringSelection?()
@@ -68,4 +76,21 @@ typealias WindowID = UInt32
     func markRecentlyUsed(_ group: TabGroup) {}
     func positionPanel(for group: TabGroup) { panelPositions += 1 }
     func reassertPanelZOrder(for group: TabGroup) { panelOrders += 1 }
+}
+
+struct DiagnosticEntry {
+    enum Event { case selection, focusSelectionDeferred }
+    enum Reason { case activationSettling }
+    var event: Event
+    var windowID: WindowID? = nil
+    var pid: Int32? = nil
+    var groupID: UUID? = nil
+    var activeWindowID: WindowID? = nil
+    var trackingWindowID: WindowID? = nil
+    var groupFrame: [Double]? = nil
+    var reason: Reason? = nil
+}
+enum WindowDiagnostics {
+    static func record(_ entry: DiagnosticEntry) {}
+    static func frame(_ frame: CGRect) -> [Double] { [] }
 }

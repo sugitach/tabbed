@@ -17,7 +17,7 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 ROOT = Path(sys.argv[1]).resolve() if len(sys.argv) > 1 else HERE.parents[1]
 OUT = Path(tempfile.mkdtemp(prefix='tabbed-activation-'))
-methods = {'Sources/Group/TabGroupController+ExternalFocus.swift': ('TabGroupController', ['applicationFocusDidChange', 'selectNotifiedMainWindow', 'selectExternallyFocusedWindow', 'selectExternallyActivatedWindow']), 'Sources/Group/TabGroupController+PanelZOrder.swift': ('TabGroupController', ['effectiveFocusedWindowID', 'frontmostGroup', 'syncPanelZOrderWithFrontmostGroup', 'syncPanelZOrderWithFrontmostGroupSoon'])}
+methods = {'Sources/Group/TabGroupController+GroupOperations.swift': ('TabGroupController', ['selectTab']), 'Sources/Group/TabGroupController+ExternalFocus.swift': ('TabGroupController', ['applicationFocusDidChange', 'selectNotifiedMainWindow', 'selectExternallyFocusedWindow', 'selectExternallyActivatedWindow']), 'Sources/Group/TabGroupController+PanelZOrder.swift': ('TabGroupController', ['effectiveFocusedWindowID', 'frontmostGroup', 'syncPanelZOrderWithFrontmostGroup', 'syncPanelZOrderWithFrontmostGroupSoon'])}
 
 def extract(source, name):
     match = re.search(r'(?m)^    (?:private )?(?:static )?func ' + name + r'\(', source)
@@ -39,6 +39,10 @@ for path, (owner, names) in methods.items():
     pieces += ['extension ' + owner + ' {\n']
     pieces += [extract(data.decode(), name).replace('private func ', 'func ') + '\n' for name in names]
     pieces += ['}\n']
+keyboard = 'Sources/Group/TabGroupController+Keyboard.swift'
+data = (ROOT/keyboard).read_bytes()
+hashes[keyboard] = hashlib.sha256(data).hexdigest()
+pieces.append(data.decode().replace(': KeyboardShortcutMonitorDelegate', ''))
 (OUT/'ProductionMethods.swift').write_text(''.join(pieces))
 for name in ['Support.swift', 'main.swift']:
     (OUT/name).write_bytes((HERE/name).read_bytes())

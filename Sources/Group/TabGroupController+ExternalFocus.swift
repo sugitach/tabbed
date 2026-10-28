@@ -52,6 +52,20 @@ extension TabGroupController {
               group.moveAnchorFrame == nil,
               isGroupOnActiveSpace(group) else { return }
 
+        // isApplyingLayout only covers synchronous AX calls. Chrome can still
+        // report the previous main/focused window after those calls return, and
+        // replay delayed main-window notifications. Treat both paths as echoes
+        // during this group's activation settlement. Explicit tab selections
+        // bypass this guard; the final deferred live check picks up a genuine
+        // external activation without retaining/replaying a stale event target.
+        guard group.activeWindow?.pid != pid ||
+              ProcessInfo.processInfo.systemUptime >= group.focusSettlementUntil else {
+            WindowDiagnostics.record(.init(event: .focusSelectionDeferred, windowID: id,
+                pid: pid, groupID: group.id, activeWindowID: group.activeWindow?.id,
+                reason: .activationSettling))
+            return
+        }
+
         // Preserve the visible group's geometry rather than adopting the parked frame.
         if activeMoveGroup === group { endTrackingActiveMove() }
         selectTab(id, in: group)

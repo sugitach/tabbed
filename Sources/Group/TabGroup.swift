@@ -8,6 +8,9 @@ final class TabGroup {
     let panel: TabBarPanel
 
     var windows: [ManagedWindow]
+    // AX activation and the focus notifications it emits complete asynchronously.
+    // Keep live queries/echoes from undoing our selection until that work settles.
+    var focusSettlementUntil: TimeInterval = 0
     var activeIndex: Int
 
     /// Shared content frame in AppKit screen coordinates.

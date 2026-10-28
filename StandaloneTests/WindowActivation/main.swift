@@ -12,6 +12,7 @@ import CoreGraphics
         c.groups = [g]
         NSWorkspace.shared.frontmostApplication = Application(100)
         c.engine.focused[100] = 2
+        c.engine.main[100] = 2
         return (c, g)
     }
     do {
@@ -27,6 +28,7 @@ import CoreGraphics
         check(c.selections == [2], "self-generated focus is idempotent")
         NSWorkspace.shared.frontmostApplication = Application(200)
         c.engine.focused[200] = 3
+        c.engine.main[200] = 3
         c.syncPanelZOrderWithFrontmostGroup()
         check(g.activeWindow?.id == 3, "cross-app member selected")
     }
@@ -84,9 +86,11 @@ import CoreGraphics
         c.engine.main[100] = 1
         NSWorkspace.shared.frontmostApplication = Application(200)
         c.engine.focused[200] = 3
+        c.engine.main[200] = 3
         c.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: 100)
         check(g.activeWindow?.id == 3, "background main hint cannot override current frontmost app")
         NSWorkspace.shared.frontmostApplication = Application(100)
+        g.focusSettlementUntil = 0
         c.engine.main[100] = 2 // Event originally concerned 1, but main changed again.
         c.syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: 100)
         check(g.activeWindow?.id == 2, "latest main query wins over old notification")
@@ -103,7 +107,10 @@ import CoreGraphics
         c.engine.main[100] = 44
         check(c.frontmostGroup() == nil, "unrelated main cannot dispatch to stale focused group")
         c.engine.main[100] = nil
-        check(c.frontmostGroup() == nil, "missing main cannot dispatch to stale focused group")
+        c.engine.focused[100] = 44
+        check(c.frontmostGroup() == nil, "missing main cannot dispatch from an ungrouped focused window")
+        c.engine.focused[100] = 2
+        check(c.frontmostGroup() === g, "missing main falls back to the live focused member")
         c.mainWindowPreferenceDeadline = .distantPast
         c.engine.focused[100] = 2
         check(c.frontmostGroup() === g, "expired preference resumes ordinary focused-window lookup")
@@ -122,6 +129,7 @@ import CoreGraphics
         check(c.frontmostGroup() === targetGroup, "two-group lookup never targets stale focused group")
         NSWorkspace.shared.frontmostApplication = Application(200)
         c.engine.focused[200] = 3
+        c.engine.main[200] = 3
         c.syncPanelZOrderWithFrontmostGroup()
         check(c.frontmostGroup() === oldGroup, "main preference remains bound to its original PID")
     }
@@ -188,6 +196,7 @@ import CoreGraphics
         RunLoop.main.run(until: Date().addingTimeInterval(0.8))
         check(c.selections == [2] && other.activeWindow?.id == 44,
               "bounce to already-active other group and settled checks do not undo selection")
+        g.focusSettlementUntil = 0 // The subsequent activation is after settlement.
         c.engine.main[100] = 1
         c.syncPanelZOrderWithFrontmostGroup()
         check(c.selections == [2, 1], "later live state is honored without replaying the event target")
@@ -236,6 +245,85 @@ import CoreGraphics
         }
         c.applicationFocusDidChange(pid: 100, mainWindowChanged: true, element: g.windows[1].element)
         check(c.selections == [2], "layout-generated main transitions cannot recursively change selection")
+        c.isStopping = true
+    }
+    do {
+        let (c, g) = fixture()
+        c.engine.focused[100] = 1
+        c.engine.main[100] = 1
+        c.selectTab(2, in: g)
+        // Recorded sequence: +0.18s focus event says 2, but live AX still says 1.
+        c.applicationFocusDidChange(pid: 100, mainWindowChanged: false, element: g.windows[1].element)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        check(c.selections == [2] && g.activeWindow?.id == 2,
+              "delayed stale live AX cannot undo explicit selection")
+        // A queued main echo can disagree with the latest explicit choice too.
+        c.selectTab(1, in: g)
+        c.applicationFocusDidChange(pid: 100, mainWindowChanged: true, element: g.windows[1].element)
+        check(c.selections == [2, 1] && g.activeWindow?.id == 1,
+              "queued main echo cannot override a second explicit tab selection")
+        c.engine.main[100] = 1
+        c.engine.focused[100] = 1
+        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+        check(c.selections == [2, 1], "settled checks do not sustain a feedback loop")
+        c.applicationFocusDidChange(pid: 100, mainWindowChanged: true, element: g.windows[1].element)
+        check(c.selections == [2, 1, 2], "external main notification works after settlement even with stale AX")
+        c.isStopping = true
+    }
+    do {
+        let (c, g) = fixture()
+        c.engine.focused[100] = 1
+        c.engine.main[100] = 1
+        c.selectTab(2, in: g)
+        // A genuine external activation during settlement is reconciled from
+        // live state by the final check, rather than replaying the event target.
+        c.applicationFocusDidChange(pid: 100, mainWindowChanged: true, element: g.windows[0].element)
+        check(c.selections == [2], "same-app external activation waits for native settlement")
+        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+        check(c.selections == [2, 1], "genuine external activation during settlement is eventually honored")
+        c.isStopping = true
+    }
+    do {
+        let (c, g) = fixture()
+        c.engine.focused[100] = 1
+        c.engine.main[100] = 1
+        c.selectTab(2, in: g)
+        c.applicationFocusDidChange(pid: 100, mainWindowChanged: false, element: g.windows[1].element)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            c.engine.main[100] = 2
+            // Focus can remain stale longer than main (existing Calendar case).
+            c.applicationFocusDidChange(pid: 100, mainWindowChanged: true, element: g.windows[1].element)
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(1.9))
+        check(c.selections == [2], "recorded stale-query then delayed main sequence never reverses selection")
+        c.isStopping = true
+    }
+    do {
+        let (c, g) = fixture()
+        c.engine.focused[100] = 1
+        c.engine.main[100] = 1
+        c.selectTab(2, in: g)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            c.engine.main[100] = 2 // AX settled; main notification is absent.
+        }
+        RunLoop.main.run(until: Date().addingTimeInterval(1.2))
+        check(c.selections == [2], "final settlement check uses main even without a main-window notification")
+        c.isStopping = true
+    }
+    do {
+        let (c, g) = fixture()
+        g.windows.removeLast() // Both members are Chrome windows.
+        c.engine.focused[100] = 1
+        c.engine.main[100] = 1
+        for _ in 0..<101 { check(c.keyboardShortcutCycleTab(forward: true), "burst key accepted") }
+        check(c.selections.isEmpty, "queued burst performs no synchronous native switches")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.08))
+        check(c.selections == [2], "101 queued keys commit one real selection")
+        // Both AX attributes still point to the previous member. The next
+        // burst must retain this group's shortcut ownership during settlement.
+        for _ in 0..<101 { check(c.keyboardShortcutCycleTab(forward: true), "next burst key accepted with stale AX") }
+        RunLoop.main.run(until: Date().addingTimeInterval(0.08))
+        check(c.selections == [2, 1], "next burst commits its final intent despite stale live AX")
         c.isStopping = true
     }
     print("PASS: \(checks) external-focus checks (real production methods; simulated AX/UI boundaries)")
