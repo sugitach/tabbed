@@ -305,6 +305,38 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     try check(c.addedWindows.isEmpty && DispatchQueue.main.pending.isEmpty, "Disabling auto-add must cancel already queued adoption")
 }
 
+@MainActor func creationWaitsForDisplaySettlement() throws {
+    let (c, _) = setup([2]); let created = ManagedWindow(90)
+    c.engine.availableWindows = [created]; c.engine.visibleWindows = [90]
+    c.displayTransitionPending = true
+    c.resolveAndAutoAddWindow(pid: created.pid, element: created.element, attemptsRemaining: 0)
+    for _ in 0..<8 {
+        try check(c.addedWindows.isEmpty && DispatchQueue.main.pending.count == 1,
+                  "Display settlement must postpone adoption without exhausting transient retries")
+        DispatchQueue.main.runNext()
+    }
+    c.displayTransitionPending = false
+    DispatchQueue.main.runNext()
+    try check(c.addedWindows == [90] && DispatchQueue.main.pending.isEmpty,
+              "Original created window must auto-add once after the display settles")
+}
+
+@MainActor func deferredCreationRevalidatesState() throws {
+    for cancellation in 0..<4 {
+        let (c, _) = setup([2]); let created = ManagedWindow(90)
+        c.engine.availableWindows = [created]; c.engine.visibleWindows = [90]
+        c.displayTransitionPending = true
+        c.handleWindowCreated(pid: created.pid, element: created.element)
+        if cancellation == 0 { c.autoAddNewWindowsToStack = false }
+        if cancellation == 1 { c.isStopping = true }
+        if cancellation == 2 { c.groups.removeAll() }
+        if cancellation == 3 { c.engine.availableWindows = []; c.engine.visibleWindows = [] }
+        c.displayTransitionPending = false
+        while !DispatchQueue.main.pending.isEmpty { DispatchQueue.main.runNext() }
+        try check(c.addedWindows.isEmpty, "Deferred adoption must revalidate setting, shutdown, group and window lifetime")
+    }
+}
+
 @MainActor func autoAddOffAndShutdownIgnoreCreation() throws {
     for stopping in [false, true] {
         let (c, _) = setup([2]); let created = ManagedWindow(90)
@@ -685,6 +717,8 @@ MainActor.assumeIsolated {
         ("drag release rechecks original window", releasedDragRechecksOriginalElement),
         ("drag retries remain bounded", dragRetriesAreBounded),
         ("delayed creation honors disabled auto-add", delayedCreationHonorsDisabledAutoAdd),
+        ("created window waits for display settlement", creationWaitsForDisplaySettlement),
+        ("deferred creation revalidates current state", deferredCreationRevalidatesState),
         ("disabled/stopped auto-add ignores creation", autoAddOffAndShutdownIgnoreCreation),
         ("failed Quit explains running/stopped state", failedQuitExplainsThatManagementRemainsStopped),
         ("successful Quit has no stopped-state notice", successfulQuitDoesNotShowStoppedNotice),

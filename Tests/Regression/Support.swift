@@ -288,8 +288,11 @@ let kAXWindowCreatedNotification = "created"
     var autoAddNewWindowsToStack = true
     var addedWindows: [WindowID] = []
     func frontmostGroup() -> TabGroup? { nil }
-    func add(_ window: ManagedWindow, to group: TabGroup) {
+    @discardableResult
+    func add(_ window: ManagedWindow, to group: TabGroup) -> Bool {
+        guard !isStopping, !deferDisplayLayout() else { return false }
         addedWindows.append(window.id); group.windows.append(window)
+        return true
     }
     var activeMoveGroup: TabGroup?
     func endTrackingActiveMove(restorePanel: Bool = true) { Trace.add("tracking.stop") }

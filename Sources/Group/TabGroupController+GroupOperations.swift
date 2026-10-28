@@ -22,12 +22,13 @@ extension TabGroupController {
         applyLayout(for: group)
     }
 
-    func add(_ window: ManagedWindow, to group: TabGroup) {
-        guard !isStopping, !deferDisplayLayout() else { return }
+    @discardableResult
+    func add(_ window: ManagedWindow, to group: TabGroup) -> Bool {
+        guard !isStopping, !deferDisplayLayout() else { return false }
         if group.contains(window.id) {
             group.activeIndex = group.windows.firstIndex { $0.id == window.id } ?? group.activeIndex
             applyLayout(for: group)
-            return
+            return true
         }
 
         if let sourceGroup = self.group(containing: window.id), sourceGroup !== group {
@@ -47,6 +48,7 @@ extension TabGroupController {
         markRecentlyUsed(group)
         updateFocusObservers()
         applyLayout(for: group)
+        return true
     }
 
     func positionPanel(for group: TabGroup) {
