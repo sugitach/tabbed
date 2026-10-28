@@ -40,7 +40,7 @@ MainActor.assumeIsolated {
         // Simulate the destination app raising its window after our initial order.
         WindowServerSnapshot.ids=[1,900]
         DispatchQueue.main.drain()
-        assert(c.syncCount==5 && g.panel.forcedFront>0 && g.panel.relativeTo==1)
+        assert(c.syncCount==6 && g.panel.forcedFront>0 && g.panel.relativeTo==1)
         WindowServerSnapshot.ids=[] // Earlier generation has no effect.
         print("PASS: delayed order checks coalesce ")
     }
@@ -51,7 +51,7 @@ MainActor.assumeIsolated {
         // No focus/activation notification: a plain content click alone repairs.
         c.mouseInteractionDidOccur()
         DispatchQueue.main.drain()
-        assert(c.syncCount==5 && g.panel.forcedFront>0 && g.panel.relativeTo==1)
+        assert(c.syncCount==6 && g.panel.forcedFront>0 && g.panel.relativeTo==1)
         print("PASS: ordinary clicks schedule panel repair without focus notifications ")
     }
     do {

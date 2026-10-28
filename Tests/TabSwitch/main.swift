@@ -86,11 +86,13 @@ MainActor.assumeIsolated {
     do {
         let saved = NSScreen.screens
         NSScreen.screens = saved + [NSScreen(frame:CGRect(x:1440,y:-742,width:1470,height:956),visibleFrame:CGRect(x:1440,y:-742,width:1470,height:924))]
-        let (c,g)=fixture(); c.parkOffscreen(g.windows[1])
+        let (c,g)=fixture(); c.parkOffscreen(g.windows[1], relativeTo: g.contentFrame)
         let parked=c.engine.writes.last!.1
-        assert(parked.minX==2909 && parked.maxY == -741)
+        assert(parked.size == g.contentFrame.size && parked.maxY == 1)
+        assert(parked.intersection(saved[0].frame).height == 1)
+        assert(parked.intersection(NSScreen.screens[1].frame).isNull)
         NSScreen.screens=saved
-        print("PASS: parking uses the desktop outer edge across offset displays")
+        print("PASS: parking stays on the source display across offset displays")
     }
     do {
         let p=Panel(), resting=CGRect(x:900,y:500,width:60,height:30), expanded=CGRect(x:600,y:500,width:360,height:30)
@@ -135,10 +137,10 @@ MainActor.assumeIsolated {
         // Simulate the destination app raising its window after our initial order.
         WindowServerSnapshot.ids=[1,900]
         DispatchQueue.main.drain()
-        assert(c.syncCount==5 && g.panel.forcedFront>0 && g.panel.relativeTo==1)
+        assert(c.syncCount==6 && g.panel.forcedFront>0 && g.panel.relativeTo==1)
         WindowServerSnapshot.ids=[] // Earlier generation has no effect.
         c.syncPanelZOrderWithFrontmostGroupSoon(); c.isStopping=true
-        DispatchQueue.main.drain(); assert(c.syncCount==5)
+        DispatchQueue.main.drain(); assert(c.syncCount==6)
         print("PASS: delayed order checks coalesce and cannot run after Quit")
     }
     do {
@@ -148,10 +150,10 @@ MainActor.assumeIsolated {
         // No focus/activation notification: a plain content click alone repairs.
         c.mouseInteractionDidOccur()
         DispatchQueue.main.drain()
-        assert(c.syncCount==5 && g.panel.forcedFront>0 && g.panel.relativeTo==1)
+        assert(c.syncCount==6 && g.panel.forcedFront>0 && g.panel.relativeTo==1)
         c.isStopping=true
         c.mouseInteractionDidOccur(); DispatchQueue.main.drain()
-        assert(c.syncCount==5)
+        assert(c.syncCount==6)
         print("PASS: ordinary clicks schedule panel repair without focus notifications and stop after Quit")
     }
     do {

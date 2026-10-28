@@ -45,6 +45,7 @@ let kAXResizedNotification = "resized"
 @MainActor final class Group {
     var windows: [Window]
     let id = UUID()
+    var focusSettlementUntil: TimeInterval = 0
     var activeIndex = 0
     var spaceID: UInt64?
     var isPanelHiddenForMove = false
@@ -111,7 +112,8 @@ let kAXResizedNotification = "resized"
                                   size: rejectSize.contains(window.id) ? previous.size : frame.size)
     }
     func refreshTitle(_ window: Window) -> String { "Fixture" }
-    func raise(_ window: Window) {}
+    var raised: [WindowID] = []
+    func raise(_ window: Window) { raised.append(window.id) }
     func activate(_ window: Window) { onActivate?() }
     func isKnownClosed(_ window: Window) -> Bool { closed.contains(window.id) }
     func isAlive(_ window: Window) -> Bool { !closed.contains(window.id) }
@@ -129,7 +131,7 @@ let kAXResizedNotification = "resized"
     func updateFocusObservers() {}
     func updateWindowLifecycleMonitoring() {} // Covered by standalone WindowLifecycle tests.
     func frontmostGroup() -> Group? { groups.first { $0.activeWindow?.id == engine.frontmost } }
-    func syncPanelZOrderWithFrontmostGroupSoon() {}
+    func syncPanelZOrderWithFrontmostGroupSoon(preferMainWindowForPID: Int32? = nil) {}
     var syncCount = 0
     func syncPanelZOrderWithFrontmostGroup() { syncCount += 1; groups.forEach { reassertPanelZOrder(for: $0) } }
     var isStopping = false

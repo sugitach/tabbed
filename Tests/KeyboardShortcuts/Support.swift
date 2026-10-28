@@ -32,8 +32,10 @@ typealias WindowID = UInt32
 struct ManagedWindow { let id: UInt32; let pid: Int32 }
 @MainActor final class TabGroup {
     var windows: [ManagedWindow]
+    var focusSettlementUntil: TimeInterval = 0
     var activeIndex = 0
     var onActiveSpace = true
+    func contains(_ id: UInt32) -> Bool { windows.contains { $0.id == id } }
     var activeWindow: ManagedWindow? { windows.indices.contains(activeIndex) ? windows[activeIndex] : nil }
     init(_ windows: [ManagedWindow]) { self.windows = windows }
 }
@@ -49,10 +51,14 @@ struct FakeApp { let processIdentifier: Int32 }
     func focusedOrMainWindowID(for pid: Int32) -> UInt32? { focusedID }
 }
 @MainActor final class TabGroupController {
+    var pendingShortcutSelection: PendingShortcutSelection?
+    var shortcutSelectionInProgress = false
+    var isStopping = false, isApplyingLayout = false
     let ownPID: Int32 = 999
     let engine = FakeEngine()
     var groups: [TabGroup] = []
     var selections: [UInt32] = []
+    var duringSelection: (() -> Void)?
     var preferredMainWindowPID: pid_t?
     var mainWindowPreferenceDeadline = Date.distantPast
     func isGroupOnActiveSpace(_ group: TabGroup) -> Bool { group.onActiveSpace }
@@ -60,5 +66,6 @@ struct FakeApp { let processIdentifier: Int32 }
         selections.append(id)
         group.activeIndex = group.windows.firstIndex(where: { $0.id == id })!
         engine.focusedID = id
+        duringSelection?()
     }
 }

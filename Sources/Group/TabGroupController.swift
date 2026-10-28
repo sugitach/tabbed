@@ -35,6 +35,8 @@ final class TabGroupController: NSObject, DragMonitorDelegate {
     private var draggedSize: CGSize?
     private var dragGrabOffset: CGSize = .zero
     private var dragTargets: [WindowFrame] = []
+    var pendingShortcutSelection: PendingShortcutSelection?
+    var shortcutSelectionInProgress = false
     var isApplyingLayout = false
     weak var mostRecentGroup: TabGroup?
 
