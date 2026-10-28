@@ -15,6 +15,7 @@ final class TabGroup {
 
     /// Shared content frame in AppKit screen coordinates.
     var contentFrame: CGRect
+    var displayLayouts = DisplayLayoutHistory()
 
     var spaceID: UInt64?
     var moveAnchorFrame: CGRect?

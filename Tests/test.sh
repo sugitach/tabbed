@@ -12,7 +12,7 @@ internal)
         /usr/bin/python3 "$TEST_ROOT/$suite/run.py"
     done
     /usr/bin/python3 "$TEST_ROOT/TabSwitch/run.py"
-    for suite in WindowActivation CompactHover WindowLifecycle GroupSession; do
+    for suite in WindowActivation CompactHover WindowLifecycle GroupSession DisplayConfiguration; do
         /usr/bin/python3 "$TEST_ROOT/../StandaloneTests/$suite/run.py"
     done
     ;;

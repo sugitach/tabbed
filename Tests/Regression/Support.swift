@@ -34,6 +34,7 @@ enum SimulatedAXError: Int32 { case success, invalidUIElement, cannotComplete, a
 @MainActor final class NSRunningApplication {
     static var terminated: [Int32: Bool] = [:]
     let pid: Int32
+    var processIdentifier: Int32 { pid }
     init?(processIdentifier: Int32) {
         guard Self.terminated[processIdentifier] != nil else { return nil }
         pid = processIdentifier
@@ -56,6 +57,8 @@ enum SimulatedAXError: Int32 { case success, invalidUIElement, cannotComplete, a
     var delegate: AnyObject?
     var onEvent: (() -> Void)? = {}
     var unobserved: [UInt32] = []
+    var observedPIDs: [Int32] = []
+    func observe(pid: Int32, notifications: [String]) { observedPIDs.append(pid) }
     var startResult = true
     var startCalls = 0
     init(_ name: String) { self.name = name }
@@ -125,6 +128,7 @@ struct WindowFrame { let id: WindowID }
 }
 @MainActor final class NSWorkspace {
     static let shared = NSWorkspace()
+    static let applicationUserInfoKey = "application"
     let notificationCenter = Center()
     var shownApps: [URL] = []
     var openedURLs: [URL] = []
@@ -144,6 +148,7 @@ let kAXResizedNotification = "resized"
 let kAXFocusedWindowAttribute = "focusedWindow"
 let kAXMainWindowAttribute = "mainWindow"
 let kAXWindowAttribute = "window"
+let kAXWindowCreatedNotification = "created"
 
 // Only the optional normal-termination callbacks are modeled. No real app or UI.
 @MainActor final class NSApplication {
@@ -273,6 +278,9 @@ let kAXWindowAttribute = "window"
 #endif
     }
     var isApplyingLayout = false
+    let displayMonitor = DisplayConfigurationMonitor()
+    var displayTransitionGeneration: UInt64 = 0
+    var displayTransitionPending = false
     var groups: [TabGroup] = []
     weak var mostRecentGroup: TabGroup?
     var draggedWindow: ManagedWindow?
@@ -280,8 +288,11 @@ let kAXWindowAttribute = "window"
     var autoAddNewWindowsToStack = true
     var addedWindows: [WindowID] = []
     func frontmostGroup() -> TabGroup? { nil }
-    func add(_ window: ManagedWindow, to group: TabGroup) {
+    @discardableResult
+    func add(_ window: ManagedWindow, to group: TabGroup) -> Bool {
+        guard !isStopping, !deferDisplayLayout() else { return false }
         addedWindows.append(window.id); group.windows.append(window)
+        return true
     }
     var activeMoveGroup: TabGroup?
     func endTrackingActiveMove(restorePanel: Bool = true) { Trace.add("tracking.stop") }
@@ -305,3 +316,14 @@ let kAXWindowAttribute = "window"
 
 // OS inventory is unknown in tests unrelated to closure detection.
 enum WindowServerSnapshot { static func windowOwners() -> [WindowID: pid_t]? { nil } }
+
+extension TabGroupController {
+    func deferDisplayLayout() -> Bool { displayTransitionPending }
+}
+
+final class DisplayConfigurationMonitor {
+    func stop() {}
+}
+extension TabGroupController {
+    func observeDisplayChanges() {}
+}

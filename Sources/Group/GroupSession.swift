@@ -14,6 +14,8 @@ struct SavedWindowGroup: Codable {
     let windows: [SavedWindowIdentity]
     let selectedID: UInt32
     let frame: CGRect
+    var displayConfiguration: String? = nil
+    var displayLayouts: DisplayLayoutHistory? = nil
 }
 
 struct GroupSession: Codable {
@@ -24,6 +26,8 @@ struct GroupSession: Codable {
         guard version == 1, groups.count <= 128 else { return false }
         var seen = Set<UInt32>()
         return groups.allSatisfy { group in
+            guard group.displayLayouts?.isValid != false,
+                  group.displayConfiguration.map({ !$0.isEmpty && $0.utf8.count <= 8192 }) ?? true else { return false }
             let f = group.frame
             guard (2...256).contains(group.windows.count),
                   f.origin.x.isFinite, f.origin.y.isFinite,

@@ -1,12 +1,34 @@
 import AppKit
 
 extension TabGroupController {
-    func add(_ window: ManagedWindow, to group: TabGroup) {
-        guard !isStopping else { return }
+    func beginPanelMove(for group: TabGroup) {
+        guard !isStopping, !deferDisplayLayout() else { return }
+        group.moveAnchorFrame = group.contentFrame
+    }
+
+    func updatePanelMove(for group: TabGroup, translation: CGSize) {
+        guard !isStopping, !deferDisplayLayout(), let anchor = group.moveAnchorFrame else { return }
+        group.contentFrame = anchor.offsetBy(dx: translation.width, dy: translation.height)
+        positionPanel(for: group)
+        // AX calls can reenter the main run loop and begin another transition.
+        guard !isStopping, !deferDisplayLayout(), group.moveAnchorFrame != nil else { return }
+        if let active = group.activeWindow { engine.setFrame(group.contentFrame, of: active) }
+    }
+
+    func endPanelMove(for group: TabGroup) {
+        let wasMoving = group.moveAnchorFrame != nil
+        group.moveAnchorFrame = nil
+        guard !isStopping, !deferDisplayLayout(), wasMoving else { return }
+        applyLayout(for: group)
+    }
+
+    @discardableResult
+    func add(_ window: ManagedWindow, to group: TabGroup) -> Bool {
+        guard !isStopping, !deferDisplayLayout() else { return false }
         if group.contains(window.id) {
             group.activeIndex = group.windows.firstIndex { $0.id == window.id } ?? group.activeIndex
             applyLayout(for: group)
-            return
+            return true
         }
 
         if let sourceGroup = self.group(containing: window.id), sourceGroup !== group {
@@ -26,10 +48,11 @@ extension TabGroupController {
         markRecentlyUsed(group)
         updateFocusObservers()
         applyLayout(for: group)
+        return true
     }
 
     func positionPanel(for group: TabGroup) {
-        guard !isStopping else { return }
+        guard !isStopping, !deferDisplayLayout() else { return }
         guard !group.isPanelHiddenForMove else { return }
         let compact = group.useCompact
         if group.viewModel.compact != compact {
@@ -48,8 +71,8 @@ extension TabGroupController {
         reassertPanelZOrder(for: group)
     }
 
-    func applyLayout(for group: TabGroup) {
-        guard !isStopping else { return }
+    func applyLayout(for group: TabGroup, raiseWindow: Bool = true) {
+        guard !isStopping, !deferDisplayLayout() else { return }
         guard isGroupOnActiveSpace(group) else {
             group.panel.hide()
             group.syncViewModel()
@@ -57,18 +80,22 @@ extension TabGroupController {
         }
 
         isApplyingLayout = true
+        defer { isApplyingLayout = false }
         WindowDiagnostics.record(.init(event: .layoutBegin, groupID: group.id,
             activeWindowID: group.activeWindow?.id, memberIDs: group.windows.map(\.id),
             groupFrame: WindowDiagnostics.frame(group.contentFrame), applyingLayout: true))
         for (index, window) in group.windows.enumerated() {
+            guard !isStopping, !deferDisplayLayout() else { return }
             _ = engine.refreshTitle(window)
+            guard !isStopping, !deferDisplayLayout() else { return }
             if index == group.activeIndex {
                 engine.setFrame(group.contentFrame, of: window)
             } else {
                 parkOffscreen(window, relativeTo: group.contentFrame)
             }
         }
-        if let active = group.activeWindow {
+        guard !isStopping, !deferDisplayLayout() else { return }
+        if raiseWindow, let active = group.activeWindow {
             engine.raise(active)
         }
         group.focusSettlementUntil = ProcessInfo.processInfo.systemUptime + 1
@@ -145,6 +172,7 @@ extension TabGroupController {
         // stack behind the active member; applyLayout raises it after parking.
         WindowDiagnostics.record(.init(event: .parking, windowID: window.id, pid: window.pid,
             requestedFrame: WindowDiagnostics.frame(parked), axFrame: WindowDiagnostics.frame(frame)))
+        guard !isStopping, !deferDisplayLayout() else { return }
         engine.setFrame(parked, of: window)
         // Applications may acknowledge an AX size request but retain a larger
         // minimum size. Recompute the destination using the accepted dimensions
@@ -153,12 +181,13 @@ extension TabGroupController {
             let corrected = parkingFrame(for: actual.size)
             WindowDiagnostics.record(.init(event: .parking, windowID: window.id, pid: window.pid,
                 requestedFrame: WindowDiagnostics.frame(corrected), axFrame: WindowDiagnostics.frame(actual)))
+            guard !isStopping, !deferDisplayLayout() else { return }
             engine.setFrame(corrected, of: window)
         }
     }
 
     func selectTab(_ id: WindowID, in group: TabGroup) {
-        guard !isStopping else { return }
+        guard !isStopping, !deferDisplayLayout() else { return }
         guard let idx = group.windows.firstIndex(where: { $0.id == id }) else { return }
         WindowDiagnostics.record(.init(event: .selection, windowID: id, pid: group.windows[idx].pid,
             groupID: group.id, activeWindowID: group.activeWindow?.id,
@@ -171,7 +200,7 @@ extension TabGroupController {
         if changesWindow {
             applyLayout(for: group)
         }
-        if isGroupOnActiveSpace(group) {
+        if !isStopping, !deferDisplayLayout(), isGroupOnActiveSpace(group) {
             group.focusSettlementUntil = ProcessInfo.processInfo.systemUptime + 1
             engine.activate(group.windows[idx])
             reassertPanelZOrder(for: group)
@@ -181,12 +210,13 @@ extension TabGroupController {
 
     func untab(_ id: WindowID, from group: TabGroup) {
         sessionInteractionGeneration &+= 1
-        guard !isStopping else { return }
+        guard !isStopping, !deferDisplayLayout() else { return }
         guard let window = group.windows.first(where: { $0.id == id }) else { return }
         let base = group.contentFrame
         remove(id, from: group, keepWindowObserved: false)
         let size = engine.frame(of: window)?.size ?? base.size
         let destination = WindowRestoration.ungroupedFrame(base, index: 1)
+        guard !isStopping, !deferDisplayLayout() else { return }
         engine.setFrame(CGRect(origin: destination.origin, size: size), of: window)
         engine.activate(window)
     }
@@ -197,6 +227,14 @@ extension TabGroupController {
 
     /// Remove a closure snapshot atomically before applying layout.
     func removeWindows(_ ids: Set<WindowID>, from group: TabGroup, keepWindowObserved: Bool) {
+        if !isStopping, deferDisplayLayout() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self, weak group] in
+                guard let self, let group, !self.isStopping,
+                      self.groups.contains(where: { $0 === group }) else { return }
+                self.removeWindows(ids, from: group, keepWindowObserved: keepWindowObserved)
+            }
+            return
+        }
         let removed = group.windows.filter { ids.contains($0.id) }
         guard !removed.isEmpty else { return }
         for window in removed {
@@ -225,6 +263,7 @@ extension TabGroupController {
     }
 
     func dissolve(_ group: TabGroup) {
+        guard !isStopping, !deferDisplayLayout() else { return }
         if activeMoveGroup === group { endTrackingActiveMove(restorePanel: false) }
         WindowDiagnostics.record(.init(event: .groupDissolved, groupID: group.id,
             activeWindowID: group.activeWindow?.id, memberIDs: group.windows.map(\.id)))

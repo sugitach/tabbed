@@ -51,7 +51,7 @@ extension TabGroupController {
     }
 
     func syncPanelZOrderWithFrontmostGroup(preferMainWindowForPID: pid_t? = nil) {
-        guard !isStopping else { return }
+        guard !isStopping, !deferDisplayLayout() else { return }
         selectExternallyFocusedWindow(preferMainWindowForPID: preferMainWindowForPID)
         let frontmost = frontmostGroup(preferMainWindowForPID: preferMainWindowForPID)
 
@@ -66,7 +66,7 @@ extension TabGroupController {
     }
 
     func reassertPanelZOrder(for group: TabGroup) {
-        guard !isStopping else { return }
+        guard !isStopping, !deferDisplayLayout() else { return }
         guard !group.isPanelHiddenForMove else { return }
         guard isGroupOnActiveSpace(group) else { return }
 

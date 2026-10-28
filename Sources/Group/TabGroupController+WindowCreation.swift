@@ -63,29 +63,28 @@ extension TabGroupController {
         // Do not take over transient windows while another app owns a mouse
         // drag (for example Chrome tearing a tab out into a temporary window).
         // Reuse the bounded retry below; if the drag outlasts it, skip auto-add.
-        if NSEvent.pressedMouseButtons & 1 == 0 {
+        if !deferDisplayLayout(), NSEvent.pressedMouseButtons & 1 == 0 {
             let candidates = engine.candidateWindowElements(from: element, pid: pid)
             let onScreen = Set(engine.onScreenWindowFrames(excluding: []).map { $0.id })
             let window = candidates
                 .compactMap { engine.managedWindow(from: $0, pid: pid) }
                 .first { group(containing: $0.id) == nil && onScreen.contains($0.id) }
 
-            if let window, let target = targetGroupForNewWindow() {
-                add(window, to: target)
-                return
-            }
-
-            if window != nil {
-                return
+            if let window {
+                guard let target = targetGroupForNewWindow() else { return }
+                if add(window, to: target) { return }
             }
         }
 
-        guard attemptsRemaining > 0 else { return }
+        // Hotplug can take longer than the transient-window retry budget. Wait
+        // without spending it, then resolve the live window and target again.
+        let waitingForDisplay = deferDisplayLayout()
+        guard waitingForDisplay || attemptsRemaining > 0 else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             self?.resolveAndAutoAddWindow(
                 pid: pid,
                 element: element,
-                attemptsRemaining: attemptsRemaining - 1
+                attemptsRemaining: attemptsRemaining - (waitingForDisplay ? 0 : 1)
             )
         }
     }

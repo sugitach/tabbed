@@ -201,6 +201,22 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     try check([1, 2, 3].allSatisfy { c.engine.frames[UInt32($0)] == frame.offsetBy(dx: CGFloat($0 - 1) * 32, dy: -CGFloat($0 - 1) * 32) }, "Existing negative-coordinate display must be preserved")
 }
 
+@MainActor func appLaunchDuringDisplayTransitionInstallsCreationObserver() throws {
+    let (c, w) = setup()
+    c.displayTransitionPending = true
+    let app = NSRunningApplication(processIdentifier: w[0].pid)!
+    let launch = Notification(name: Notification.Name("launch"),
+        userInfo: [NSWorkspace.applicationUserInfoKey: app])
+    c.applicationDidLaunch(launch)
+    try check(c.windowCreationObserver.observedPIDs == [w[0].pid],
+        "Display settlement must not lose the app launch observer registration")
+    try check(c.engine.writes.isEmpty, "Observer registration does not move a window")
+    c.autoAddNewWindowsToStack = false;c.applicationDidLaunch(launch)
+    c.autoAddNewWindowsToStack = true;c.isStopping = true;c.applicationDidLaunch(launch)
+    try check(c.windowCreationObserver.observedPIDs.count == 1,
+        "Disabled auto-add and shutdown still prevent registration")
+}
+
 @MainActor func windowCreationDoesNotAdoptUnrelatedFocusedWindow() throws {
     let (c, _) = setup([2])
     let destination = ManagedWindow(90)
@@ -287,6 +303,38 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     c.autoAddNewWindowsToStack = false; NSEvent.pressedMouseButtons = 0
     DispatchQueue.main.runNext()
     try check(c.addedWindows.isEmpty && DispatchQueue.main.pending.isEmpty, "Disabling auto-add must cancel already queued adoption")
+}
+
+@MainActor func creationWaitsForDisplaySettlement() throws {
+    let (c, _) = setup([2]); let created = ManagedWindow(90)
+    c.engine.availableWindows = [created]; c.engine.visibleWindows = [90]
+    c.displayTransitionPending = true
+    c.resolveAndAutoAddWindow(pid: created.pid, element: created.element, attemptsRemaining: 0)
+    for _ in 0..<8 {
+        try check(c.addedWindows.isEmpty && DispatchQueue.main.pending.count == 1,
+                  "Display settlement must postpone adoption without exhausting transient retries")
+        DispatchQueue.main.runNext()
+    }
+    c.displayTransitionPending = false
+    DispatchQueue.main.runNext()
+    try check(c.addedWindows == [90] && DispatchQueue.main.pending.isEmpty,
+              "Original created window must auto-add once after the display settles")
+}
+
+@MainActor func deferredCreationRevalidatesState() throws {
+    for cancellation in 0..<4 {
+        let (c, _) = setup([2]); let created = ManagedWindow(90)
+        c.engine.availableWindows = [created]; c.engine.visibleWindows = [90]
+        c.displayTransitionPending = true
+        c.handleWindowCreated(pid: created.pid, element: created.element)
+        if cancellation == 0 { c.autoAddNewWindowsToStack = false }
+        if cancellation == 1 { c.isStopping = true }
+        if cancellation == 2 { c.groups.removeAll() }
+        if cancellation == 3 { c.engine.availableWindows = []; c.engine.visibleWindows = [] }
+        c.displayTransitionPending = false
+        while !DispatchQueue.main.pending.isEmpty { DispatchQueue.main.runNext() }
+        try check(c.addedWindows.isEmpty, "Deferred adoption must revalidate setting, shutdown, group and window lifetime")
+    }
 }
 
 @MainActor func autoAddOffAndShutdownIgnoreCreation() throws {
@@ -660,6 +708,7 @@ MainActor.assumeIsolated {
         ("stopped callbacks preserve targets", stoppedCallbacksCannotDropOrRelayoutWindows),
         ("explicit untab keeps offset", explicitUntabKeepsExistingOffset),
         ("single survivor dissolves", oneRemainingWindowDissolvesSafely),
+        ("app launched during display transition stays observed", appLaunchDuringDisplayTransitionInstallsCreationObserver),
         ("creation cannot adopt unrelated focused/main window", windowCreationDoesNotAdoptUnrelatedFocusedWindow),
         ("closed transient cannot adopt focused destination", closedCreationDoesNotAdoptFocusedDestination),
         ("ordinary created window still auto-adds", directCreatedWindowStillAutoAdds),
@@ -668,6 +717,8 @@ MainActor.assumeIsolated {
         ("drag release rechecks original window", releasedDragRechecksOriginalElement),
         ("drag retries remain bounded", dragRetriesAreBounded),
         ("delayed creation honors disabled auto-add", delayedCreationHonorsDisabledAutoAdd),
+        ("created window waits for display settlement", creationWaitsForDisplaySettlement),
+        ("deferred creation revalidates current state", deferredCreationRevalidatesState),
         ("disabled/stopped auto-add ignores creation", autoAddOffAndShutdownIgnoreCreation),
         ("failed Quit explains running/stopped state", failedQuitExplainsThatManagementRemainsStopped),
         ("successful Quit has no stopped-state notice", successfulQuitDoesNotShowStoppedNotice),

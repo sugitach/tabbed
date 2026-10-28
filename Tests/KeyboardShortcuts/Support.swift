@@ -69,3 +69,7 @@ struct FakeApp { let processIdentifier: Int32 }
         duringSelection?()
     }
 }
+
+extension TabGroupController {
+    func deferDisplayLayout() -> Bool { false }
+}

@@ -74,3 +74,7 @@ let kAXResizedNotification = "resized"
         func runNext() { if !pending.isEmpty { pending.removeFirst()() } }
     }
 }
+
+extension TabGroupController {
+    func deferDisplayLayout() -> Bool { false }
+}

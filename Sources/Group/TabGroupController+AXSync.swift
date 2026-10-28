@@ -38,6 +38,7 @@ extension TabGroupController {
             remove(id, from: group, keepWindowObserved: false)
 
         case kAXMovedNotification, kAXResizedNotification:
+            guard !deferDisplayLayout() else { return }
             guard group.activeWindow?.id == id,
                   isGroupOnActiveSpace(group) else {
                 WindowDiagnostics.record(.init(event: .notificationIgnored, windowID: id,
@@ -63,7 +64,7 @@ extension TabGroupController {
     }
 
     func beginTrackingActiveMove(for group: TabGroup) {
-        guard !isStopping else { return }
+        guard !isStopping, !deferDisplayLayout() else { return }
         if activeMoveGroup !== group || activeMoveOriginWindowID != group.activeWindow?.id {
             endTrackingActiveMove()
         }
@@ -81,6 +82,7 @@ extension TabGroupController {
     }
 
     func adoptTrackedFrame(_ frame: CGRect, for group: TabGroup) {
+        guard !deferDisplayLayout() else { return }
         if frame != group.contentFrame {
             // Reset only on real geometry changes: duplicate AX notifications
             // must not prevent the panel from returning after motion stops.
@@ -95,7 +97,7 @@ extension TabGroupController {
     }
 
     func tickActiveMove() {
-        guard !isStopping else { return }
+        guard !isStopping, !deferDisplayLayout() else { return }
         guard let group = activeMoveGroup, let active = group.activeWindow,
               groups.contains(where: { $0 === group }),
               active.id == activeMoveOriginWindowID else {

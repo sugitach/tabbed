@@ -174,3 +174,7 @@ struct AXStatus { let rawValue: Int32 = 0 }
     func asyncAfter(deadline: DispatchTime, execute: @escaping () -> Void) { pending.append(execute) }
     func drain() { let work = pending; pending = []; work.forEach { $0() } }
 }
+
+extension Controller {
+    func deferDisplayLayout() -> Bool { false }
+}
