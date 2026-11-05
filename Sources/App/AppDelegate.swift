@@ -65,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if alert.runModal() == .alertSecondButtonReturn {
             let confirmation = NSAlert()
             confirmation.messageText = "Quit without restoring all windows?"
-            confirmation.informativeText = "Window management is already stopped. Tabbed will quit without making any further changes to your windows. Unrestored windows may remain offscreen; check that you can access them before quitting."
+            confirmation.informativeText = "Window management is already stopped. Tabbed will quit without making any further changes to your windows. Unrestored windows may remain minimized in the Dock; check that you can access them before quitting."
             // Cancel is the default. Only explicit confirmation allows exit.
             confirmation.addButton(withTitle: "Cancel")
             confirmation.addButton(withTitle: "Quit Without Restoring")

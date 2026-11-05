@@ -150,6 +150,10 @@ final class AXWindowEngine: WindowEngine {
     }
 
     func restoreFrame(_ frame: CGRect, of window: ManagedWindow) -> Bool {
+        let restoringMinimizedWindow = window.minimizedByTabbed
+        if restoringMinimizedWindow {
+            guard setMinimized(false, of: window) else { return false }
+        }
         AXUIElementSetMessagingTimeout(window.element, 1.0)
         let cgFrame = CoordinateConverter.cgFrame(fromAppKit: frame)
         // Recover a parked window onto its destination display before resize.
@@ -163,9 +167,28 @@ final class AXWindowEngine: WindowEngine {
             positionStatus: positionStatus.rawValue))
         // A rejected no-op setter is not a failure if the frame is correct.
         // WindowServer geometry also avoids stale AX caches after a successful move.
-        return WindowRestoration.verify(frame: frame,
-            read: { self.windowServerFrame(of: window.id) ?? self.frame(of: window) },
-            wait: { Thread.sleep(forTimeInterval: 0.02) })
+        let restored = WindowRestoration.verify(frame: frame,
+            read: {
+                guard !restoringMinimizedWindow || self.isMinimized(of: window) == false else { return nil }
+                return self.windowServerFrame(of: window.id) ?? self.frame(of: window)
+            },
+            wait: { Thread.sleep(forTimeInterval: 0.02) }, attempts: restoringMinimizedWindow ? 100 : 10)
+        if restored { window.minimizedByTabbed = false }
+        return restored
+    }
+
+    func isMinimized(of window: ManagedWindow) -> Bool? {
+        copyBoolAttribute(kAXMinimizedAttribute, from: window.element)
+    }
+
+    @discardableResult
+    func setMinimized(_ minimized: Bool, of window: ManagedWindow) -> Bool {
+        if isMinimized(of: window) == minimized { return true }
+        let status = AXUIElementSetAttributeValue(window.element, kAXMinimizedAttribute as CFString,
+            minimized ? kCFBooleanTrue : kCFBooleanFalse)
+        WindowDiagnostics.record(.init(event: .minimizationRequest, windowID: window.id,
+            pid: window.pid, status: status.rawValue, minimized: minimized))
+        return status == .success || isMinimized(of: window) == minimized
     }
 
     func raise(_ window: ManagedWindow) {

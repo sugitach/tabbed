@@ -18,7 +18,7 @@ extension TabGroupController {
         }
         // AX setters can pump the run loop. Retry lifecycle changes after layout.
         if isApplyingLayout,
-           notification == kAXUIElementDestroyedNotification || notification == kAXWindowMiniaturizedNotification {
+           notification == kAXUIElementDestroyedNotification || notification == kAXWindowMiniaturizedNotification || notification == kAXWindowDeminiaturizedNotification {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
                 self?.handleWindowNotification(id: id, notification: notification)
             }
@@ -34,8 +34,22 @@ extension TabGroupController {
         }
 
         switch notification {
-        case kAXUIElementDestroyedNotification, kAXWindowMiniaturizedNotification:
+        case kAXUIElementDestroyedNotification:
             remove(id, from: group, keepWindowObserved: false)
+
+        case kAXWindowMiniaturizedNotification:
+            guard let window = group.windows.first(where: { $0.id == id }),
+                  !window.minimizedByTabbed, engine.isMinimized(of: window) == true else { return }
+            // Preserve the previous behavior for a user's explicit minimize.
+            remove(id, from: group, keepWindowObserved: false)
+
+        case kAXWindowDeminiaturizedNotification:
+            guard !deferDisplayLayout(),
+                  let window = group.windows.first(where: { $0.id == id }),
+                  window.minimizedByTabbed, engine.isMinimized(of: window) == false else { return }
+            window.minimizedByTabbed = false
+            // A Dock restore of an inactive member is an explicit tab selection.
+            if group.activeWindow?.id != id { selectTab(id, in: group) }
 
         case kAXMovedNotification, kAXResizedNotification:
             guard !deferDisplayLayout() else { return }

@@ -8,7 +8,7 @@ OUT = Path(tempfile.mkdtemp(prefix='tabbed-display-tests-'))
 selected = {
  'Group/TabGroupController+DisplayConfiguration.swift': ['deferDisplayLayout','rememberDisplayLayouts','displayConfigurationDidChange','scheduleDisplaySettlement','settleDisplayConfiguration'],
  'Group/TabGroupController+AXSync.swift': ['beginTrackingActiveMove','adoptTrackedFrame','tickActiveMove','endTrackingActiveMove'],
- 'Group/TabGroupController+GroupOperations.swift': ['applyLayout','parkOffscreen','positionPanel','selectTab','beginPanelMove','updatePanelMove','endPanelMove'],
+ 'Group/TabGroupController+GroupOperations.swift': ['applyLayout','restoreTabWindow','minimizeTabWindow','positionPanel','selectTab','beginPanelMove','updatePanelMove','endPanelMove'],
  'Group/TabGroupController+PanelZOrder.swift': ['reassertPanelZOrder'],
  'Group/TabGroupController+Workspace.swift': ['isGroupOnActiveSpace'],
  'UI/TabBarPanel.swift': ['applyLayout','cancelCollapseWatch','setExpanded','collapseAfterSelection','beginCollapseWatch','tickCollapseWatch','cancelPendingExpansion'],

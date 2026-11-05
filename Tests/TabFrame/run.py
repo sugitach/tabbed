@@ -4,7 +4,7 @@ from pathlib import Path
 import re,subprocess,tempfile
 ROOT=Path(__file__).resolve().parents[2]
 HERE=Path(__file__).resolve().parent
-SELECTED={'Group/TabGroupController+GroupOperations.swift': ('Controller', ['positionPanel', 'applyLayout', 'parkOffscreen', 'selectTab', 'dissolve']), 'Group/TabGroupController+AXSync.swift': ('Controller', ['handleWindowNotification', 'beginTrackingActiveMove', 'tickActiveMove', 'endTrackingActiveMove']), 'Group/TabGroupController+PanelZOrder.swift': ('Controller', ['reassertPanelZOrder']), 'Group/TabGroupController+Workspace.swift': ('Controller', ['isGroupOnActiveSpace']), 'Accessibility/AXWindowEngine.swift': ('AXWindowEngine', ['setFrame']), 'UI/TabBarPanel.swift': ('Panel', ['applyLayout', 'cancelCollapseWatch'])}
+SELECTED={'Group/TabGroupController+GroupOperations.swift': ('Controller', ['positionPanel', 'applyLayout', 'restoreTabWindow', 'minimizeTabWindow', 'selectTab', 'dissolve']), 'Group/TabGroupController+AXSync.swift': ('Controller', ['handleWindowNotification', 'beginTrackingActiveMove', 'tickActiveMove', 'endTrackingActiveMove']), 'Group/TabGroupController+PanelZOrder.swift': ('Controller', ['reassertPanelZOrder']), 'Group/TabGroupController+Workspace.swift': ('Controller', ['isGroupOnActiveSpace']), 'Accessibility/AXWindowEngine.swift': ('AXWindowEngine', ['setFrame']), 'UI/TabBarPanel.swift': ('Panel', ['applyLayout', 'cancelCollapseWatch'])}
 def method(source,name):
  hit=re.search(r'(?m)^    (?:@objc )?(?:private )?func '+name+r'\(',source)
  assert hit,name

@@ -84,15 +84,42 @@ MainActor.assumeIsolated {
         print("PASS: unchanged-size parking keeps the existing setter order")
     }
     do {
-        let saved = NSScreen.screens
-        NSScreen.screens = saved + [NSScreen(frame:CGRect(x:1440,y:-742,width:1470,height:956),visibleFrame:CGRect(x:1440,y:-742,width:1470,height:924))]
-        let (c,g)=fixture(); c.parkOffscreen(g.windows[1], relativeTo: g.contentFrame)
-        let parked=c.engine.writes.last!.1
-        assert(parked.size == g.contentFrame.size && parked.maxY == 1)
-        assert(parked.intersection(saved[0].frame).height == 1)
-        assert(parked.intersection(NSScreen.screens[1].frame).isNull)
-        NSScreen.screens=saved
-        print("PASS: parking stays on the source display across offset displays")
+        let (c,g)=fixture(); let original=c.engine.frames[2]
+        c.applyLayout(for:g)
+        assert(c.engine.minimized == [2] && g.windows[1].minimizedByTabbed)
+        assert(c.engine.frames[2] == original)
+        c.handleWindowNotification(id:2,notification:kAXWindowMiniaturizedNotification)
+        assert(g.windows.count == 2)
+        c.selectTab(2,in:g)
+        assert(c.engine.minimized == [1] && !g.windows[1].minimizedByTabbed)
+        c.handleWindowNotification(id:2,notification:kAXWindowMiniaturizedNotification)
+        assert(g.windows.count == 2)
+        print("PASS: own minimization preserves membership, geometry and ignores stale events")
+    }
+    do {
+        let (c,g)=fixture();c.applyLayout(for:g)
+        c.engine.minimized.remove(2)
+        c.handleWindowNotification(id:2,notification:kAXWindowDeminiaturizedNotification)
+        assert(g.activeWindow?.id == 2 && c.engine.minimized == [1])
+        print("PASS: external restore selects the restored tab")
+    }
+    do {
+        let (c,g)=fixture();c.engine.rejectMinimization.insert(2);c.applyLayout(for:g)
+        assert(!g.windows[1].minimizedByTabbed && c.engine.frames[2] == g.contentFrame)
+        print("PASS: rejected minimization stacks on screen without offscreen movement")
+    }
+    do {
+        let (c,g)=fixture();c.applyLayout(for:g);c.engine.rejectRestoration.insert(2)
+        c.selectTab(2,in:g)
+        assert(g.activeWindow?.id == 1 && g.windows[1].minimizedByTabbed && !c.engine.minimized.contains(1))
+        print("PASS: rejected restore retains current visible tab and retry ownership")
+    }
+    do {
+        let (c,g)=fixture();c.engine.minimized.insert(2)
+        c.minimizeTabWindow(g.windows[1],fallbackFrame:g.contentFrame)
+        assert(!g.windows[1].minimizedByTabbed)
+        assert(c.restoreTabWindow(g.windows[1]) && c.engine.minimized.contains(2))
+        print("PASS: user minimization is not claimed or undone")
     }
     do {
         let p=Panel(), resting=CGRect(x:900,y:500,width:60,height:30), expanded=CGRect(x:600,y:500,width:360,height:30)
@@ -237,6 +264,7 @@ MainActor.assumeIsolated {
         for compact in [false, true] {
             DispatchQueue.main.drain()
             let (c,g)=fixture(); g.useCompact=compact; c.applyLayout(for:g)
+            let initialWrites=c.engine.writes.count
             let panelFrame=g.panel.frame
             let moved=g.contentFrame.offsetBy(dx:80,dy:40)
             c.engine.frames[1]=moved; c.engine.cgFrames[1]=moved
@@ -253,7 +281,7 @@ MainActor.assumeIsolated {
             c.tickActiveMove()
             assert(g.panel.visible && !g.isPanelHiddenForMove && c.activeMoveGroup == nil)
             assert(g.panel.frame==g.stripFrame && g.panel.relativeTo==1)
-            assert(c.engine.writes.count==2, "Move tracking must never move the content window")
+            assert(c.engine.writes.count==initialWrites, "Move tracking must never move the content window")
         }
         print("PASS: normal and compact panels hide while moving and return at the final position after 0.1 seconds of stability")
     }

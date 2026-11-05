@@ -31,7 +31,7 @@ extension TabGroupController {
         selectExternallyActivatedWindow(window.id, pid: pid)
     }
 
-    /// Read current focus, including parked tabs, for ordinary/settled checks.
+    /// Read current focus, including grouped tabs, for ordinary/settled checks.
     func selectExternallyFocusedWindow(preferMainWindowForPID: pid_t? = nil) {
         guard !isStopping, !isApplyingLayout, draggedWindow == nil,
               let app = NSWorkspace.shared.frontmostApplication,
@@ -52,6 +52,9 @@ extension TabGroupController {
               group.moveAnchorFrame == nil,
               isGroupOnActiveSpace(group) else { return }
 
+        guard let window = group.windows.first(where: { $0.id == id }),
+              engine.isMinimized(of: window) != true else { return }
+
         // isApplyingLayout only covers synchronous AX calls. Chrome can still
         // report the previous main/focused window after those calls return, and
         // replay delayed main-window notifications. Treat both paths as echoes
@@ -66,7 +69,7 @@ extension TabGroupController {
             return
         }
 
-        // Preserve the visible group's geometry rather than adopting the parked frame.
+        // Preserve the visible group's geometry rather than adopting the restored window’s frame.
         if activeMoveGroup === group { endTrackingActiveMove() }
         selectTab(id, in: group)
     }

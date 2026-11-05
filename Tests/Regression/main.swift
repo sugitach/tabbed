@@ -374,7 +374,7 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) throws {
     try check(requestNormalQuit(c, delegate: delegate) == .terminateNow, "An explicitly confirmed bypass must allow exit despite failed restoration")
     try check(NSAlert.presentations.count == 2, "Bypass must show a separate confirmation and no Keep Open notice")
     let confirmation = NSAlert.presentations[1]
-    try check(confirmation.buttons == ["Cancel", "Quit Without Restoring"] && confirmation.information.contains("offscreen"), "Confirmation must default to Cancel and disclose unrecovered windows")
+    try check(confirmation.buttons == ["Cancel", "Quit Without Restoring"] && confirmation.information.contains("minimized in the Dock"), "Confirmation must default to Cancel and disclose unrecovered windows")
     try check(c.engine.attempts == [1, 2] && c.engine.writes.isEmpty, "The termination fallback must not retry writes after bypass confirmation")
     try check(c.isStopping && c.groups.count == 1 && c.dragMonitor.delegate == nil, "Explicit exit must not reactivate management or fake a successful restoration")
     NSAlert.presentations = []

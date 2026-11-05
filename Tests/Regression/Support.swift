@@ -45,6 +45,7 @@ enum SimulatedAXError: Int32 { case success, invalidUIElement, cannotComplete, a
     let id: UInt32
     let pid: Int32
     let element: AXUIElement
+    var minimizedByTabbed = false
     var appName = "Regression fixture"
     var title = "Test window"
     init(_ id: UInt32, pid: Int32? = nil) {
@@ -81,6 +82,7 @@ enum SimulatedAXError: Int32 { case success, invalidUIElement, cannotComplete, a
 }
 @MainActor final class AXWindowEngine {
     // isKnownClosed/isAlive are extracted verbatim from production into an extension.
+    func isMinimized(of window: ManagedWindow) -> Bool? { window.minimizedByTabbed }
     var frames: [UInt32: CGRect] = [:]
     var attempts: [UInt32] = []
     var writes: [(UInt32, CGRect)] = []
@@ -142,6 +144,7 @@ struct WindowFrame { let id: WindowID }
     }
 }
 let kAXUIElementDestroyedNotification = "destroyed"
+let kAXWindowDeminiaturizedNotification = "deminiaturized"
 let kAXWindowMiniaturizedNotification = "minimized"
 let kAXMovedNotification = "moved"
 let kAXResizedNotification = "resized"
@@ -297,6 +300,8 @@ let kAXWindowCreatedNotification = "created"
     var activeMoveGroup: TabGroup?
     func endTrackingActiveMove(restorePanel: Bool = true) { Trace.add("tracking.stop") }
     func resetDragState() { draggedWindow = nil; Trace.add("drag.reset") }
+    func selectTab(_ id: WindowID, in group: TabGroup) {}
+    func restoreTabWindow(_ window: ManagedWindow) -> Bool { true }
     func applyLayout(for group: TabGroup) { Trace.add("layout") }
     func updateFocusObservers() { Trace.add("focus.update") }
     func isGroupOnActiveSpace(_ group: TabGroup) -> Bool { true }
