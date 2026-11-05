@@ -38,6 +38,7 @@ typealias WindowID = UInt32
     var activeWindow: ManagedWindow? { windows[activeIndex] }
 }
 @MainActor final class Engine {
+    func isMinimized(of window: ManagedWindow) -> Bool? { false }
     var activations: [WindowID] = []
     func activate(_ window: ManagedWindow) { activations.append(window.id) }
     var deadIDs: Set<WindowID> = []
@@ -64,6 +65,7 @@ typealias WindowID = UInt32
     var trackingEnds = 0, panelPositions = 0, panelOrders = 0
     var selectedFrames: [CGRect] = []
     var duringSelection: (() -> Void)?
+    func restoreTabWindow(_ window: ManagedWindow) -> Bool { true }
     func isGroupOnActiveSpace(_ group: TabGroup) -> Bool { group.onActiveSpace }
     func endTrackingActiveMove() { if activeMoveGroup != nil { trackingEnds += 1 }; activeMoveGroup = nil }
     // Real selectTab calls this simulated AX/layout boundary.

@@ -7,6 +7,8 @@ final class ManagedWindow {
     let id: WindowID
     let pid: pid_t
     let element: AXUIElement
+    // Only minimizations initiated by Tabbed are undone on ungroup/quit.
+    var minimizedByTabbed = false
     var title: String
     var appName: String
     var appBundleID: String?
@@ -75,6 +77,9 @@ protocol WindowEngine: AnyObject {
 
     /// Restore for shutdown, reporting AX errors and verifying the resulting frame.
     func restoreFrame(_ frame: CGRect, of window: ManagedWindow) -> Bool
+
+    func isMinimized(of window: ManagedWindow) -> Bool?
+    @discardableResult func setMinimized(_ minimized: Bool, of window: ManagedWindow) -> Bool
 
     func raise(_ window: ManagedWindow)
     func activate(_ window: ManagedWindow)

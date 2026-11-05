@@ -5,12 +5,14 @@ typealias WindowID = UInt32
 typealias TabGroup = Group
 typealias ManagedWindow = Window
 let kAXUIElementDestroyedNotification = "destroyed"
+let kAXWindowDeminiaturizedNotification = "deminiaturized"
 let kAXWindowMiniaturizedNotification = "miniaturized"
 let kAXMovedNotification = "moved"
 let kAXResizedNotification = "resized"
 @MainActor final class Window {
     let id: WindowID
     let pid: Int32
+    var minimizedByTabbed = false
     var element: WindowID { id }
     init(_ id: WindowID, _ pid: Int32) { self.id = id; self.pid = pid }
 }
@@ -89,6 +91,12 @@ let kAXResizedNotification = "resized"
     var rejectSize: Set<WindowID> = []
     var rejectPosition: Set<WindowID> = []
     var closed: Set<WindowID> = []
+    var minimized: Set<WindowID> = []
+    func isMinimized(of window: Window) -> Bool? { minimized.contains(window.id) }
+    func setMinimized(_ value: Bool, of window: Window) -> Bool {
+        if value { minimized.insert(window.id) } else { minimized.remove(window.id) }
+        return true
+    }
     var spaces: [WindowID: UInt64] = [:]
     func activeSpaceID() -> UInt64? { activeSpaces?.first }
     var activeSpaces: Set<UInt64>?

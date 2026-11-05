@@ -76,6 +76,16 @@ func owners(_ ids: [WindowID]) {
     }
     do {
         let (c, g) = fixture()
+        g.windows[1].minimizedByTabbed = true
+        owners([1, 3])
+        c.reconcileWindowLifetimes()
+        check(g.windows.map(\.id) == [1, 2, 3], "minimized member missing from WindowServer is retained while AX identity lives")
+        c.engine.closed.insert(2)
+        c.reconcileWindowLifetimes()
+        check(g.windows.map(\.id) == [1, 3], "confirmed closure removes a minimized member")
+    }
+    do {
+        let (c, g) = fixture()
         c.isApplyingLayout = true
         owners([2, 3])
         let queries = snapshotQueries

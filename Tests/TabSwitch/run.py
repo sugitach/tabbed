@@ -17,7 +17,7 @@ def method(source, name):
     raise AssertionError(name)
 selected = {
     'Group/TabGroupController.swift':['formGroup'],
-    'Group/TabGroupController+GroupOperations.swift':['positionPanel','applyLayout','parkOffscreen','selectTab','dissolve'],
+    'Group/TabGroupController+GroupOperations.swift':['positionPanel','applyLayout','restoreTabWindow','minimizeTabWindow','selectTab','dissolve'],
     'Group/TabGroupController+AXSync.swift':['handleWindowNotification','beginTrackingActiveMove','adoptTrackedFrame','tickActiveMove','endTrackingActiveMove'],
     'Group/TabGroupController+PanelZOrder.swift':['mouseInteractionDidOccur','reassertPanelZOrder','syncPanelZOrderWithFrontmostGroupSoon'],
     'Group/TabGroupController+Workspace.swift':['isGroupOnActiveSpace'],

@@ -27,7 +27,14 @@ extension TabGroupController {
         // Use one complete WindowServer snapshot, never a visibility-filtered
         // list or an AX timeout, as the fallback closure evidence.
         for group in groups {
-            let closedIDs = Set(group.windows.filter { owners[$0.id] != $0.pid }.map(\.id))
+            let closedIDs = Set(group.windows.filter { window in
+                guard owners[window.id] != window.pid else { return false }
+                // Minimized windows may disappear from WindowServer lists.
+                if window.minimizedByTabbed || engine.isMinimized(of: window) == true {
+                    return engine.isKnownClosed(window)
+                }
+                return true
+            }.map(\.id))
             removeWindows(closedIDs, from: group, keepWindowObserved: false)
         }
     }

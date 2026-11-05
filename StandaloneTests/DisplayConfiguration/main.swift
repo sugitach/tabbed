@@ -24,7 +24,7 @@ c.applyLayout(for:group);c.adoptTrackedFrame(b,for:group);c.selectTab(2,in:group
 check(c.engine.writes.isEmpty && group.contentFrame==a && group.activeIndex==0,"no AX adoption/writes/switch during transition")
 settle()
 check(!c.displayTransitionPending && group.contentFrame==b,"first configuration adopts macOS placement")
-check(c.engine.frames[1]==b && c.engine.writes.contains{$0.0==2},"active restored and inactive reparked")
+check(c.engine.frames[1]==b && c.engine.minimized == [2] && c.engine.frames[2] == a,"active restored and inactive minimized without moving")
 check(group.displayLayouts.frame(for:"A")==a,"original layout survives OS movement")
 c.adoptTrackedFrame(movedB,for:group)
 DisplayConfigurationMonitor.key="A";NSScreen.screens=[builtIn,external];c.engine.frames[1]=frame(0,0,600,400)

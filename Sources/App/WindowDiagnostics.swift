@@ -7,6 +7,7 @@ import Darwin
 struct WindowDiagnosticEntry: Codable, Equatable {
     enum Event: String, Codable {
         case recordingStarted, recordingStopped, selection, layoutBegin, layoutEnd
+        case minimizationRequest
         case parking, frameRequest, frameResult, frameRead, activationState
         case observerCreated, observerRegistered, notificationReceived, notificationIgnored
         case frameAdopted, trackingBegin, trackingSample, trackingEnd, closureCheck
@@ -16,7 +17,7 @@ struct WindowDiagnosticEntry: Codable, Equatable {
         case inputMonitoringState, focusSnapshot, mainWindowRead, focusSelectionDeferred
     }
     enum NotificationKind: String, Codable {
-        case moved, resized, destroyed, minimized, created, focusChanged, mainChanged, applicationActivated, focusedElementChanged, other
+        case moved, resized, destroyed, minimized, restored, created, focusChanged, mainChanged, applicationActivated, focusedElementChanged, other
     }
     enum Reason: String, Codable {
         case stopping, applyingLayout, unmanaged, unmatchedElement, inactive, unavailable
@@ -190,6 +191,7 @@ enum WindowDiagnostics {
         case "AXResized": return .resized
         case "AXUIElementDestroyed": return .destroyed
         case "AXWindowMiniaturized": return .minimized
+        case "AXWindowDeminiaturized": return .restored
         case "AXWindowCreated": return .created
         case "AXFocusedWindowChanged": return .focusChanged
         case "AXMainWindowChanged": return .mainChanged

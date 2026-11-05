@@ -16,6 +16,7 @@ func CGWindowListCopyWindowInfo(_ options: CGWindowListOption, _ relativeTo: UIn
 enum WindowServerSnapshot {}
 
 @MainActor final class ManagedWindow {
+    var minimizedByTabbed = false
     let id: WindowID
     let pid: Int32
     init(_ id: WindowID) { self.id = id; pid = 100 }
@@ -40,6 +41,9 @@ enum WindowServerSnapshot {}
 }
 @MainActor final class Engine {
     var writes: [WindowID] = []
+    func isMinimized(of w: ManagedWindow) -> Bool? { w.minimizedByTabbed }
+    var closed: Set<WindowID> = []
+    func isKnownClosed(_ w: ManagedWindow) -> Bool { closed.contains(w.id) }
     func setFrame(_ frame: CGRect, of window: ManagedWindow) { writes.append(window.id) }
     func frame(of window: ManagedWindow) -> CGRect? { nil }
 }
@@ -55,6 +59,8 @@ enum WindowServerSnapshot {}
     var trackingEnds = 0
     func group(containing id: WindowID) -> TabGroup? { groups.first { $0.windows.contains { $0.id == id } } }
     func applyLayout(for group: TabGroup) { layouts.append(group.windows.map(\.id)) }
+    func restoreTabWindow(_ w: ManagedWindow) -> Bool { w.minimizedByTabbed = false; return true }
+    func selectTab(_ id: WindowID, in group: TabGroup) {}
     func updateFocusObservers() {}
     func endTrackingActiveMove(restorePanel: Bool = true) { activeMoveGroup = nil; trackingEnds += 1 }
     func isGroupOnActiveSpace(_ group: TabGroup) -> Bool { true }
@@ -64,6 +70,7 @@ enum WindowServerSnapshot {}
 }
 let kAXUIElementDestroyedNotification = "destroyed"
 let kAXWindowMiniaturizedNotification = "minimized"
+let kAXWindowDeminiaturizedNotification = "restored"
 let kAXMovedNotification = "moved"
 let kAXResizedNotification = "resized"
 @MainActor enum DispatchQueue {

@@ -6,9 +6,11 @@ typealias TabGroup = Group
 typealias ManagedWindow = Window
 let kAXUIElementDestroyedNotification = "destroyed"
 let kAXWindowMiniaturizedNotification = "miniaturized"
+let kAXWindowDeminiaturizedNotification = "restored"
 let kAXMovedNotification = "moved"
 let kAXResizedNotification = "resized"
 @MainActor final class Window {
+    var minimizedByTabbed = false
     let id: WindowID
     let pid: Int32
     var element: WindowID { id }
@@ -84,6 +86,18 @@ let kAXResizedNotification = "resized"
     func add(_ timer: Timer, forMode: Mode) {}
 }
 @MainActor final class Engine {
+    var minimized: Set<WindowID> = []
+    var rejectMinimization: Set<WindowID> = []
+    var rejectRestoration: Set<WindowID> = []
+    var minRequests: [(WindowID,Bool)] = []
+    func isMinimized(of w: Window) -> Bool? { minimized.contains(w.id) }
+    func setMinimized(_ value: Bool, of w: Window) -> Bool {
+        minRequests.append((w.id,value))
+        if value ? rejectMinimization.contains(w.id) : rejectRestoration.contains(w.id) { return false }
+        if value { minimized.insert(w.id) } else { minimized.remove(w.id) }
+        return true
+    }
+
     var frames: [WindowID: CGRect] = [:]
     var cgFrames: [WindowID: CGRect] = [:]
     var rejectSize: Set<WindowID> = []

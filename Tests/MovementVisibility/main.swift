@@ -77,17 +77,6 @@ MainActor.assumeIsolated {
         print("PASS: unchanged-size parking keeps the existing setter order")
     }
     do {
-        let saved = NSScreen.screens
-        NSScreen.screens = saved + [NSScreen(frame:CGRect(x:1440,y:-742,width:1470,height:956),visibleFrame:CGRect(x:1440,y:-742,width:1470,height:924))]
-        let (c,g)=fixture(); c.parkOffscreen(g.windows[1], relativeTo: g.contentFrame)
-        let parked=c.engine.writes.last!.1
-        assert(parked.size == g.contentFrame.size && parked.maxY == 1)
-        assert(parked.intersection(saved[0].frame).height == 1)
-        assert(parked.intersection(NSScreen.screens[1].frame).isNull)
-        NSScreen.screens=saved
-        print("PASS: parking stays on the source display across offset displays")
-    }
-    do {
         let (c,g)=fixture(); c.selectTab(1,in:g)
         assert(c.engine.writes.isEmpty)
         assert(g.activeIndex==0 && g.panel.relativeTo==1)
@@ -210,6 +199,7 @@ MainActor.assumeIsolated {
         for compact in [false, true] {
             DispatchQueue.main.drain()
             let (c,g)=fixture(); g.useCompact=compact; c.applyLayout(for:g)
+            let initialWrites=c.engine.writes.count
             let panelFrame=g.panel.frame
             let moved=g.contentFrame.offsetBy(dx:80,dy:40)
             c.engine.frames[1]=moved; c.engine.cgFrames[1]=moved
@@ -226,7 +216,7 @@ MainActor.assumeIsolated {
             c.tickActiveMove()
             assert(g.panel.visible && !g.isPanelHiddenForMove && c.activeMoveGroup == nil)
             assert(g.panel.frame==g.stripFrame && g.panel.relativeTo==1)
-            assert(c.engine.writes.count==2, "Move tracking must never move the content window")
+            assert(c.engine.writes.count==initialWrites, "Move tracking must never move the content window")
         }
         print("PASS: normal and compact panels hide while moving and return at the final position after 0.1 seconds of stability")
     }

@@ -84,15 +84,14 @@ extension TabGroupController {
         WindowDiagnostics.record(.init(event: .layoutBegin, groupID: group.id,
             activeWindowID: group.activeWindow?.id, memberIDs: group.windows.map(\.id),
             groupFrame: WindowDiagnostics.frame(group.contentFrame), applyingLayout: true))
-        for (index, window) in group.windows.enumerated() {
+        // Reveal the destination before hiding the previous tab. AX callbacks
+        // may run during setters; ownership is tracked before each request.
+        guard let active = group.activeWindow, restoreTabWindow(active) else { return }
+        engine.setFrame(group.contentFrame, of: active)
+        for window in group.windows {
             guard !isStopping, !deferDisplayLayout() else { return }
             _ = engine.refreshTitle(window)
-            guard !isStopping, !deferDisplayLayout() else { return }
-            if index == group.activeIndex {
-                engine.setFrame(group.contentFrame, of: window)
-            } else {
-                parkOffscreen(window, relativeTo: group.contentFrame)
-            }
+            if window.id != active.id { minimizeTabWindow(window, fallbackFrame: group.contentFrame) }
         }
         guard !isStopping, !deferDisplayLayout() else { return }
         if raiseWindow, let active = group.activeWindow {
@@ -114,75 +113,28 @@ extension TabGroupController {
         syncPanelZOrderWithFrontmostGroupSoon()
     }
 
-    /// Leave only a one-point edge on the group's display, never on a neighbor.
-    private func parkOffscreen(_ window: ManagedWindow, relativeTo referenceFrame: CGRect) {
-        guard let frame = engine.frame(of: window) else { return }
-        let screens = NSScreen.screens.map(\.frame)
-        func area(_ rect: CGRect) -> CGFloat {
-            rect.isNull ? 0 : max(0, rect.width) * max(0, rect.height)
+    /// Do not undo a user's own minimization when releasing a group.
+    func restoreTabWindow(_ window: ManagedWindow) -> Bool {
+        guard window.minimizedByTabbed else { return true }
+        window.minimizedByTabbed = false
+        // AX acknowledges the request before macOS completes the animation.
+        guard engine.setMinimized(false, of: window) else {
+            window.minimizedByTabbed = true
+            return false
         }
-        func distance(to screen: CGRect) -> CGFloat {
-            let dx = max(screen.minX - referenceFrame.midX, 0, referenceFrame.midX - screen.maxX)
-            let dy = max(screen.minY - referenceFrame.midY, 0, referenceFrame.midY - screen.maxY)
-            return dx * dx + dy * dy
-        }
-        // The inactive window may already have been assigned to another display.
-        // Select from the group frame, not its current parked AX frame.
-        guard let sourceIndex = screens.indices.min(by: { lhs, rhs in
-            let left = area(screens[lhs].intersection(referenceFrame))
-            let right = area(screens[rhs].intersection(referenceFrame))
-            return left != right ? left > right : distance(to: screens[lhs]) < distance(to: screens[rhs])
-        }) else { return }
-        let source = screens[sourceIndex]
-        func parkingFrame(for size: CGSize) -> CGRect {
-            guard size.width > 1, size.height > 1 else { return referenceFrame }
-            var xs = [referenceFrame.minX, source.minX, source.maxX - size.width,
-                      source.minX - size.width + 1, source.maxX - 1]
-            var ys = [referenceFrame.minY, source.minY, source.maxY - size.height,
-                      source.minY - size.height + 1, source.maxY - 1]
-            for screen in screens {
-                // Neighbor boundaries are the points at which a safe interval can
-                // start or end. Include them for offset and partially shared edges.
-                xs += [screen.minX - size.width, screen.maxX]
-                ys += [screen.minY - size.height, screen.maxY]
-            }
-            var candidates: [CGRect] = []
-            // Prefer below the display, then its sides, then above it.
-            for x in xs {
-                candidates.append(CGRect(x: x, y: source.minY + 1 - size.height,
-                                         width: size.width, height: size.height))
-            }
-            for x in [source.minX + 1 - size.width, source.maxX - 1] {
-                for y in ys {
-                    candidates.append(CGRect(x: x, y: y, width: size.width, height: size.height))
-                }
-            }
-            for x in xs {
-                candidates.append(CGRect(x: x, y: source.maxY - 1,
-                                         width: size.width, height: size.height))
-            }
-            return candidates.first { candidate in
-                area(candidate.intersection(source)) > 0 && screens.indices.allSatisfy { index in
-                    index == sourceIndex || area(candidate.intersection(screens[index])) == 0
-                }
-            } ?? CGRect(origin: referenceFrame.origin, size: size)
-        }
-        let parked = parkingFrame(for: referenceFrame.size)
-        // A surrounded display may have no safe outside edge. In that case,
-        // stack behind the active member; applyLayout raises it after parking.
-        WindowDiagnostics.record(.init(event: .parking, windowID: window.id, pid: window.pid,
-            requestedFrame: WindowDiagnostics.frame(parked), axFrame: WindowDiagnostics.frame(frame)))
-        guard !isStopping, !deferDisplayLayout() else { return }
-        engine.setFrame(parked, of: window)
-        // Applications may acknowledge an AX size request but retain a larger
-        // minimum size. Recompute the destination using the accepted dimensions
-        // so the real window cannot spill into an adjacent display.
-        if let actual = engine.frame(of: window), actual.size != parked.size {
-            let corrected = parkingFrame(for: actual.size)
-            WindowDiagnostics.record(.init(event: .parking, windowID: window.id, pid: window.pid,
-                requestedFrame: WindowDiagnostics.frame(corrected), axFrame: WindowDiagnostics.frame(actual)))
-            guard !isStopping, !deferDisplayLayout() else { return }
-            engine.setFrame(corrected, of: window)
+        return true
+    }
+
+    func minimizeTabWindow(_ window: ManagedWindow, fallbackFrame: CGRect) {
+        if engine.isMinimized(of: window) == true { return }
+        let previouslyOwned = window.minimizedByTabbed
+        window.minimizedByTabbed = true
+        guard engine.setMinimized(true, of: window) else {
+            window.minimizedByTabbed = previouslyOwned
+            // Unsupported/rejected minimization must never strand a window offscreen.
+            // Stack behind the active member, which applyLayout raises last.
+            engine.setFrame(fallbackFrame, of: window)
+            return
         }
     }
 
@@ -195,6 +147,7 @@ extension TabGroupController {
             groupFrame: WindowDiagnostics.frame(group.contentFrame)))
         endTrackingActiveMove()
         let changesWindow = group.activeIndex != idx
+        guard restoreTabWindow(group.windows[idx]) else { return }
         group.activeIndex = idx
         group.panel.collapseAfterSelection()
         if changesWindow {
@@ -212,6 +165,7 @@ extension TabGroupController {
         sessionInteractionGeneration &+= 1
         guard !isStopping, !deferDisplayLayout() else { return }
         guard let window = group.windows.first(where: { $0.id == id }) else { return }
+        guard restoreTabWindow(window) else { return }
         let base = group.contentFrame
         remove(id, from: group, keepWindowObserved: false)
         let size = engine.frame(of: window)?.size ?? base.size
@@ -265,6 +219,7 @@ extension TabGroupController {
     func dissolve(_ group: TabGroup) {
         guard !isStopping, !deferDisplayLayout() else { return }
         if activeMoveGroup === group { endTrackingActiveMove(restorePanel: false) }
+        guard group.windows.allSatisfy({ restoreTabWindow($0) }) else { return }
         WindowDiagnostics.record(.init(event: .groupDissolved, groupID: group.id,
             activeWindowID: group.activeWindow?.id, memberIDs: group.windows.map(\.id)))
         group.panel.hide()

@@ -8,14 +8,14 @@ enum WindowRestoration {
 
     /// AX setters may return before the application publishes its new frame.
     /// Observe a bounded settling interval without repeating window writes.
-    static func verify(frame: CGRect, read: () -> CGRect?, wait: () -> Void) -> Bool {
-        for attempt in 0...10 {
+    static func verify(frame: CGRect, read: () -> CGRect?, wait: () -> Void, attempts: Int = 10) -> Bool {
+        for attempt in 0...attempts {
             if let actual = read(),
                abs(actual.minX - frame.minX) <= 2, abs(actual.minY - frame.minY) <= 2,
                abs(actual.width - frame.width) <= 2, abs(actual.height - frame.height) <= 2 {
                 return true
             }
-            if attempt < 10 { wait() }
+            if attempt < attempts { wait() }
         }
         return false
     }
